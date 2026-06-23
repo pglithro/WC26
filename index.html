@@ -21,7 +21,7 @@
             border-radius: 10px;
         }
         h1 {
-            color: #0f2942;
+            color: #1a365d;
             text-align: center;
             margin-bottom: 5px;
         }
@@ -87,13 +87,13 @@
 
 <div class="container">
     <h1>🏆 World Cup Sweepstake Standings 🏆</h1>
-    <div class="subtitle">Live Group Standings via OpenFootball</div>
-    <div id="loading">Loading tournament standings from GitHub...</div>
+    <div class="subtitle">Live Calculations via OpenFootball Stream</div>
+    <div id="loading">Calculating standings from live feed...</div>
     <div id="tables-container"></div>
 </div>
 
 <script>
-// Sweepstake configuration matching image_25d644.png
+// Sweepstake data mapping from image_25d644.png
 const sweepstakeData = {
     "France": "Alexis", "Curaçao": "Alexis", "Curacao": "Alexis",
     "Spain": "Savir", "Haiti": "Savir",
@@ -121,7 +121,6 @@ const sweepstakeData = {
     "Paraguay": "Steve", "Scotland": "Steve"
 };
 
-// Raw source file tracking 2026 data on GitHub (Guaranteed No CORS failures on GitHub Pages)
 const githubSource = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 
 async function generateStandings() {
@@ -130,41 +129,106 @@ async function generateStandings() {
         if (!response.ok) throw new Error('Data fetch failed');
         const data = await response.json();
         
+        // Object to hold calculated stats for each team inside their groups
+        const standings = {};
+
+        // Loop through all rounds and matches to compile stats
+        data.rounds.forEach(round => {
+            if (!round.matches) return;
+            
+            round.matches.forEach(match => {
+                // We only care about group stage matches for group standings tables
+                if (!match.group) return; 
+
+                const groupName = match.group;
+                const team1 = match.team1;
+                const team2 = match.team2;
+
+                // Initialize teams if they don't exist yet
+                [team1, team2].forEach(team => {
+                    if (!standings[team]) {
+                        standings[team] = { 
+                            name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 
+                        };
+                    }
+                });
+
+                // Check if the match has been played/has scores
+                if (match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null) {
+                    const s1 = parseInt(match.score1);
+                    const s2 = parseInt(match.score2);
+
+                    standings[team1].played++;
+                    standings[team2].played++;
+                    standings[team1].gf += s1;
+                    standings[team1].ga += s2;
+                    standings[team2].gf += s2;
+                    standings[team2].ga += s1;
+
+                    if (s1 > s2) {
+                        standings[team1].won++;
+                        standings[team1].pts += 3;
+                        standings[team2].lost++;
+                    } else if (s1 < s2) {
+                        standings[team2].won++;
+                        standings[team2].pts += 3;
+                        standings[team1].lost++;
+                    } else {
+                        standings[team1].drawn++;
+                        standings[team2].drawn++;
+                        standings[team1].pts += 1;
+                        standings[team2].pts += 1;
+                    }
+                    
+                    standings[team1].gd = standings[team1].gf - standings[team1].ga;
+                    standings[team2].gd = standings[team2].gf - standings[team2].ga;
+                }
+            });
+        });
+
+        // Group the processed teams together by group ID
+        const groups = {};
+        Object.values(standings).forEach(team => {
+            if (!groups[team.group]) groups[team.group] = [];
+            groups[team.group].push(team);
+        });
+
+        // Hide loading state
         document.getElementById('loading').style.display = 'none';
         const container = document.getElementById('tables-container');
 
-        // Process each Group from the structure
-        data.groups.forEach(group => {
+        // Sort groups alphabetically (Group A, Group B...)
+        const sortedGroupNames = Object.keys(groups).sort();
+
+        sortedGroupNames.forEach(groupName => {
             const card = document.createElement('div');
             card.className = 'group-card';
             
-            let tableRows = '';
-            
-            // Sort teams by points, then goal difference descending
-            group.teams.sort((a, b) => b.pts - a.pts || b.gd - a.gd);
+            // Sort teams within the group: Points -> Goal Difference -> Goals For
+            const teamsInGroup = groups[groupName];
+            teamsInGroup.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
 
-            group.teams.forEach((team, index) => {
-                const teamName = team.name;
-                const player = sweepstakeData[teamName] || '';
+            let tableRows = '';
+            teamsInGroup.forEach((team, index) => {
+                const player = sweepstakeData[team.name] || '';
                 const playerBadge = player ? `<span class="player-tag">${player}</span>` : '';
 
-                // Handle properties safely assuming typical sports keys (pts, m, w, d, l, gd)
                 tableRows += `
                     <tr>
                         <td style="width: 40px; font-weight: bold; color: #888;">${index + 1}</td>
-                        <td style="font-weight: 600;">${teamName} ${playerBadge}</td>
-                        <td>${team.m ?? 0}</td>
-                        <td>${team.w ?? 0}</td>
-                        <td>${team.d ?? 0}</td>
-                        <td>${team.l ?? 0}</td>
-                        <td>${(team.gd ?? 0) > 0 ? '+' + team.gd : team.gd ?? 0}</td>
-                        <td style="font-weight: bold; color: #1a365d;">${team.pts ?? 0}</td>
+                        <td style="font-weight: 600;">${team.name} ${playerBadge}</td>
+                        <td>${team.played}</td>
+                        <td>${team.won}</td>
+                        <td>${team.drawn}</td>
+                        <td>${team.lost}</td>
+                        <td>${team.gd > 0 ? '+' + team.gd : team.gd}</td>
+                        <td style="font-weight: bold; color: #1a365d;">${team.pts}</td>
                     </tr>
                 `;
             });
 
             card.innerHTML = `
-                <div class="group-header">${group.name}</div>
+                <div class="group-header">${groupName}</div>
                 <table>
                     <thead>
                         <tr>
@@ -187,7 +251,7 @@ async function generateStandings() {
         });
 
     } catch (error) {
-        document.getElementById('loading').innerText = "❌ Error connecting to data stream. Refresh to retry.";
+        document.getElementById('loading').innerText = "❌ Error processing raw data feed. Please try again.";
         console.error(error);
     }
 }
