@@ -31,7 +31,6 @@
             margin-bottom: 25px;
         }
         
-        /* Tab Navigation Styles */
         .tabs {
             display: flex;
             border-bottom: 2px solid #e1e4e8;
@@ -64,7 +63,6 @@
             display: block;
         }
 
-        /* Standings Cards & Tables */
         .group-card {
             background: #fff;
             border: 1px solid #e1e4e8;
@@ -111,7 +109,6 @@
             display: inline-block;
         }
 
-        /* Knockouts List */
         .ko-stage {
             background: #edf2f7;
             padding: 12px;
@@ -218,7 +215,6 @@ function switchTab(tabId) {
     document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
     
     document.getElementById(tabId).classList.add('active');
-    // Set active button state
     const btnIndex = tabId === 'group-tab' ? 0 : 1;
     document.querySelectorAll('.tab-button')[btnIndex].classList.add('active');
 }
@@ -250,6 +246,32 @@ function extractAllMatches(obj, currentRoundName = '') {
     return matches;
 }
 
+// Helper to reliably extract scores from various openfootball schemas
+function parseScores(match) {
+    let s1 = null;
+    let s2 = null;
+
+    if (match.score1 !== undefined && match.score1 !== null) s1 = match.score1;
+    if (match.score2 !== undefined && match.score2 !== null) s2 = match.score2;
+
+    // Fallback if structured inside a nested score wrapper object
+    if (s1 === null && match.score && match.score.fulltime) {
+        s1 = match.score.fulltime[0];
+        s2 = match.score.fulltime[1];
+    }
+    
+    if (s1 === null && match.score) {
+        if (match.score.score1 !== undefined) s1 = match.score.score1;
+        if (match.score.score2 !== undefined) s2 = match.score.score2;
+    }
+
+    return {
+        hasScore: (s1 !== null && s2 !== null && s1 !== "" && s2 !== ""),
+        score1: parseInt(s1),
+        score2: parseInt(s2)
+    };
+}
+
 async function generateStandings() {
     try {
         const response = await fetch(githubSource);
@@ -268,11 +290,13 @@ async function generateStandings() {
         allMatches.forEach(match => {
             const team1 = match.team1 || "TBD";
             const team2 = match.team2 || "TBD";
-            const hasScore = match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null;
+            
+            // Extract score using the flexible helper function
+            const scoreInfo = parseScores(match);
 
             if (match.group) {
                 totalGroupMatches++;
-                if (hasScore) completedGroupMatches++;
+                if (scoreInfo.hasScore) completedGroupMatches++;
 
                 const groupName = match.group;
                 [team1, team2].forEach(team => {
@@ -282,9 +306,9 @@ async function generateStandings() {
                     }
                 });
 
-                if (hasScore) {
-                    const s1 = parseInt(match.score1);
-                    const s2 = parseInt(match.score2);
+                if (scoreInfo.hasScore) {
+                    const s1 = scoreInfo.score1;
+                    const s2 = scoreInfo.score2;
 
                     standings[team1].played++; standings[team2].played++;
                     standings[team1].gf += s1; standings[team1].ga += s2;
@@ -304,11 +328,9 @@ async function generateStandings() {
             }
         });
 
-        // HIDE LOADING STATE & SHOW TABS
         document.getElementById('loading').style.display = 'none';
         document.getElementById('nav-tabs').style.display = 'flex';
 
-        // --- RENDER GROUP TABLES ---
         const groups = {};
         Object.values(standings).forEach(team => {
             if (!groups[team.group]) groups[team.group] = [];
@@ -342,7 +364,6 @@ async function generateStandings() {
             tablesContainer.appendChild(card);
         });
 
-        // --- RENDER KNOCKOUT BRACKET LIST ---
         const koContainer = document.getElementById('knockout-container');
         koContainer.innerHTML = '';
         
@@ -357,8 +378,9 @@ async function generateStandings() {
                     const p1 = sweepstakeData[match.team1] ? ` <span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
                     const p2 = sweepstakeData[match.team2] ? ` <span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
                     
-                    const s1 = match.score1 !== undefined && match.score1 !== null ? match.score1 : '-';
-                    const s2 = match.score2 !== undefined && match.score2 !== null ? match.score2 : '-';
+                    const scoreInfo = parseScores(match);
+                    const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
+                    const s2 = scoreInfo.score2 ? scoreInfo.score2 : '-';
 
                     const matchRow = document.createElement('div');
                     matchRow.className = 'ko-match';
@@ -376,10 +398,8 @@ async function generateStandings() {
             koContainer.innerHTML = `<div class="placeholder-text">Knockout stages will appear here as soon as the group stages conclude.</div>`;
         }
 
-        // --- SMART DEFAULT TAB SWITCH ---
-        // Switch tab to knockouts if all group matches are done, or if a knockout match has started
         const hasKnockoutsStarted = Object.values(knockoutStages).some(stage => 
-            stage.some(m => m.score1 !== undefined && m.score1 !== null)
+            stage.some(m => parseScores(m).hasScore)
         );
         const isGroupStageOver = totalGroupMatches > 0 && (completedGroupMatches >= totalGroupMatches);
 
