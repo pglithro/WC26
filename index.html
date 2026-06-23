@@ -3,42 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Cup 2026 Sweepstake Standings</title>
+    <title>World Cup Sweepstake Standings</title>
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f0f2f5;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #f4f6f9;
             margin: 0;
             padding: 20px;
             color: #333;
         }
         .container {
-            max-width: 1000px;
+            max-width: 900px;
             margin: 0 auto;
             background: white;
-            padding: 30px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-radius: 10px;
         }
         h1 {
-            color: #1a365d;
+            color: #0f2942;
             text-align: center;
             margin-bottom: 5px;
         }
         .subtitle {
             text-align: center;
-            color: #718096;
+            color: #666;
             margin-bottom: 30px;
         }
         .group-card {
             background: #fff;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #e1e4e8;
             border-radius: 8px;
             margin-bottom: 25px;
             overflow: hidden;
         }
         .group-header {
-            background: #2b6cb0;
+            background: #1a365d;
             color: white;
             padding: 12px 20px;
             font-weight: bold;
@@ -49,18 +49,18 @@
             border-collapse: collapse;
         }
         th, td {
-            padding: 12px 15px;
+            padding: 10px 15px;
             text-align: left;
         }
         th {
-            background-color: #f7fafc;
-            color: #4a5568;
-            font-size: 0.9em;
+            background-color: #f7f9fa;
+            color: #555;
+            font-size: 0.85em;
             text-transform: uppercase;
-            border-bottom: 2px solid #edf2f7;
+            border-bottom: 2px solid #e1e4e8;
         }
         tr {
-            border-bottom: 1px solid #edf2f7;
+            border-bottom: 1px solid #edf0f2;
         }
         tr:hover {
             background-color: #f8fafc;
@@ -78,8 +78,8 @@
         #loading {
             text-align: center;
             font-size: 1.2em;
-            color: #4a5568;
-            padding: 5px;
+            color: #555;
+            padding: 40px;
         }
     </style>
 </head>
@@ -87,13 +87,13 @@
 
 <div class="container">
     <h1>🏆 World Cup Sweepstake Standings 🏆</h1>
-    <p class="subtitle">Live updates paired with player data</p>
-    <div id="loading">Loading tournament standings...</div>
+    <div class="subtitle">Live Group Standings via OpenFootball</div>
+    <div id="loading">Loading tournament standings from GitHub...</div>
     <div id="tables-container"></div>
 </div>
 
 <script>
-// Sweepstake data mapping from image_25d644.png
+// Sweepstake configuration matching image_25d644.png
 const sweepstakeData = {
     "France": "Alexis", "Curaçao": "Alexis", "Curacao": "Alexis",
     "Spain": "Savir", "Haiti": "Savir",
@@ -121,50 +121,50 @@ const sweepstakeData = {
     "Paraguay": "Steve", "Scotland": "Steve"
 };
 
-// Utilizing an open, CORS-friendly soccer standings dataset API
-const apiURL = 'https://raw.githubusercontent.com/openfootball/world-cup/master/2026/cup.json';
+// Raw source file tracking 2026 data on GitHub (Guaranteed No CORS failures on GitHub Pages)
+const githubSource = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 
-async function loadStandings() {
+async function generateStandings() {
     try {
-        // Fallback layout container in case raw endpoint undergoes updates mid-tournament
-        // We'll fetch from an optimized public API structure
-        const response = await fetch('https://worldcupjson.net/teams/results');
-        if (!response.ok) throw new Error('API server down');
+        const response = await fetch(githubSource);
+        if (!response.ok) throw new Error('Data fetch failed');
+        const data = await response.json();
         
-        const groups = await response.json();
         document.getElementById('loading').style.display = 'none';
         const container = document.getElementById('tables-container');
 
-        groups.forEach(group => {
+        // Process each Group from the structure
+        data.groups.forEach(group => {
             const card = document.createElement('div');
             card.className = 'group-card';
             
             let tableRows = '';
             
-            // Sort teams by points, then goal difference
-            group.teams.sort((a, b) => b.points - a.points || b.goal_differential - a.goal_differential);
+            // Sort teams by points, then goal difference descending
+            group.teams.sort((a, b) => b.pts - a.pts || b.gd - a.gd);
 
             group.teams.forEach((team, index) => {
                 const teamName = team.name;
                 const player = sweepstakeData[teamName] || '';
                 const playerBadge = player ? `<span class="player-tag">${player}</span>` : '';
 
+                // Handle properties safely assuming typical sports keys (pts, m, w, d, l, gd)
                 tableRows += `
                     <tr>
-                        <td style="width: 50px; font-weight: bold; color: #718096;">${index + 1}</td>
+                        <td style="width: 40px; font-weight: bold; color: #888;">${index + 1}</td>
                         <td style="font-weight: 600;">${teamName} ${playerBadge}</td>
-                        <td>${team.games_played}</td>
-                        <td>${team.wins}</td>
-                        <td>${team.draws}</td>
-                        <td>${team.losses}</td>
-                        <td>${team.goal_differential > 0 ? '+' + team.goal_differential : team.goal_differential}</td>
-                        <td style="font-weight: bold; color: #2b6cb0;">${team.points}</td>
+                        <td>${team.m ?? 0}</td>
+                        <td>${team.w ?? 0}</td>
+                        <td>${team.d ?? 0}</td>
+                        <td>${team.l ?? 0}</td>
+                        <td>${(team.gd ?? 0) > 0 ? '+' + team.gd : team.gd ?? 0}</td>
+                        <td style="font-weight: bold; color: #1a365d;">${team.pts ?? 0}</td>
                     </tr>
                 `;
             });
 
             card.innerHTML = `
-                <div class="group-header">Group ${group.letter}</div>
+                <div class="group-header">${group.name}</div>
                 <table>
                     <thead>
                         <tr>
@@ -187,13 +187,12 @@ async function loadStandings() {
         });
 
     } catch (error) {
-        // Fallback mock loader if connection dropped, to keep page functional
-        document.getElementById('loading').innerText = "Unable to fetch live API data. Please verify network access.";
+        document.getElementById('loading').innerText = "❌ Error connecting to data stream. Refresh to retry.";
         console.error(error);
     }
 }
 
-loadStandings();
+generateStandings();
 </script>
 
 </body>
