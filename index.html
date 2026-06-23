@@ -123,88 +123,107 @@ const sweepstakeData = {
 
 const githubSource = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 
+// Helper function to recursively search for any match objects within the JSON structure
+function extractAllMatches(obj) {
+    let matches = [];
+    if (!obj || typeof obj !== 'object') return matches;
+    
+    if (Array.isArray(obj)) {
+        obj.forEach(item => {
+            matches = matches.concat(extractAllMatches(item));
+        });
+    } else {
+        if (obj.matches && Array.isArray(obj.matches)) {
+            matches = matches.concat(obj.matches);
+        }
+        for (const key in obj) {
+            if (key !== 'matches' && typeof obj[key] === 'object') {
+                matches = matches.concat(extractAllMatches(obj[key]));
+            }
+        }
+    }
+    return matches;
+}
+
 async function generateStandings() {
     try {
         const response = await fetch(githubSource);
         if (!response.ok) throw new Error('Data fetch failed');
         const data = await response.json();
         
-        // Object to hold calculated stats for each team inside their groups
+        // Dynamically find all matches regardless of nesting schema (.rounds, .stages, etc.)
+        const allMatches = extractAllMatches(data);
+        
+        if (allMatches.length === 0) {
+            throw new Error('No matches found in the retrieved JSON structure.');
+        }
+
         const standings = {};
 
-        // Loop through all rounds and matches to compile stats
-        data.rounds.forEach(round => {
-            if (!round.matches) return;
-            
-            round.matches.forEach(match => {
-                // We only care about group stage matches for group standings tables
-                if (!match.group) return; 
+        // Process matches
+        allMatches.forEach(match => {
+            if (!match.group) return; // Only compile group matches
 
-                const groupName = match.group;
-                const team1 = match.team1;
-                const team2 = match.team2;
+            const groupName = match.group;
+            const team1 = match.team1;
+            const team2 = match.team2;
 
-                // Initialize teams if they don't exist yet
-                [team1, team2].forEach(team => {
-                    if (!standings[team]) {
-                        standings[team] = { 
-                            name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 
-                        };
-                    }
-                });
-
-                // Check if the match has been played/has scores
-                if (match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null) {
-                    const s1 = parseInt(match.score1);
-                    const s2 = parseInt(match.score2);
-
-                    standings[team1].played++;
-                    standings[team2].played++;
-                    standings[team1].gf += s1;
-                    standings[team1].ga += s2;
-                    standings[team2].gf += s2;
-                    standings[team2].ga += s1;
-
-                    if (s1 > s2) {
-                        standings[team1].won++;
-                        standings[team1].pts += 3;
-                        standings[team2].lost++;
-                    } else if (s1 < s2) {
-                        standings[team2].won++;
-                        standings[team2].pts += 3;
-                        standings[team1].lost++;
-                    } else {
-                        standings[team1].drawn++;
-                        standings[team2].drawn++;
-                        standings[team1].pts += 1;
-                        standings[team2].pts += 1;
-                    }
-                    
-                    standings[team1].gd = standings[team1].gf - standings[team1].ga;
-                    standings[team2].gd = standings[team2].gf - standings[team2].ga;
+            [team1, team2].forEach(team => {
+                if (!standings[team]) {
+                    standings[team] = { 
+                        name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 
+                    };
                 }
             });
+
+            if (match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null) {
+                const s1 = parseInt(match.score1);
+                const s2 = parseInt(match.score2);
+
+                standings[team1].played++;
+                standings[team2].played++;
+                standings[team1].gf += s1;
+                standings[team1].ga += s2;
+                standings[team2].gf += s2;
+                standings[team2].ga += s1;
+
+                if (s1 > s2) {
+                    standings[team1].won++;
+                    standings[team1].pts += 3;
+                    standings[team2].lost++;
+                } else if (s1 < s2) {
+                    standings[team2].won++;
+                    standings[team2].pts += 3;
+                    standings[team1].lost++;
+                } else {
+                    standings[team1].drawn++;
+                    standings[team2].drawn++;
+                    standings[team1].pts += 1;
+                    standings[team2].pts += 1;
+                }
+                
+                standings[team1].gd = standings[team1].gf - standings[team1].ga;
+                standings[team2].gd = standings[team2].gf - standings[team2].ga;
+            }
         });
 
-        // Group the processed teams together by group ID
+        // Split up calculations into groups
         const groups = {};
         Object.values(standings).forEach(team => {
             if (!groups[team.group]) groups[team.group] = [];
             groups[team.group].push(team);
         });
 
-        // Hide loading state
+        // Empty container and remove loading message
         document.getElementById('loading').style.display = 'none';
         const container = document.getElementById('tables-container');
+        container.innerHTML = '';
 
-        // Sort groups alphabetically (Group A, Group B...)
-        const sortedGroupNames = Object.keys(groups).sort();
-
-        sortedGroupNames.forEach(groupName => {
+        // Render sorted groups
+        Object.keys(groups).sort().forEach(groupName => {
             const card = document.createElement('div');
             card.className = 'group-card';
             
-            // Sort teams within the group: Points -> Goal Difference -> Goals For
             const teamsInGroup = groups[groupName];
             teamsInGroup.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
 
@@ -251,7 +270,7 @@ async function generateStandings() {
         });
 
     } catch (error) {
-        document.getElementById('loading').innerText = "❌ Error processing raw data feed. Please try again.";
+        document.getElementById('loading').innerText = "❌ Structural mapping error. Unable to parse matches.";
         console.error(error);
     }
 }
