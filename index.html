@@ -13,7 +13,7 @@
             color: #333;
         }
         .container {
-            max-width: 1400px; /* Expanded for full bracket scale layout */
+            max-width: 1400px;
             margin: 0 auto;
             background: white;
             padding: 25px;
@@ -64,7 +64,7 @@
             display: block;
         }
 
-        /* Fixed Grid Table Configuration */
+        /* Group Tables CSS */
         .group-card {
             background: #fff;
             border: 1px solid #e1e4e8;
@@ -105,7 +105,6 @@
             background-color: #f8fafc;
         }
         
-        /* Layout Column Weights */
         .col-pos { width: 8%; }
         .col-team { width: 44%; text-align: left; }
         .col-stat { width: 8%; }
@@ -120,25 +119,25 @@
             font-size: 0.8em;
             margin-left: 4px;
             display: inline-block;
+            flex-shrink: 0; /* Prevents badge clipping */
         }
 
-        /* Visual Bracket Styles */
+        /* Refined Visual Bracket Styles */
         .bracket-wrapper {
             overflow-x: auto;
             padding: 20px 0;
         }
         .bracket-grid {
             display: grid;
-            grid-template-columns: repeat(6, minmax(200px, 1fr));
+            grid-template-columns: repeat(6, minmax(220px, 1fr));
             gap: 15px;
-            align-items: stretch;
         }
         .bracket-column {
             display: flex;
             flex-direction: column;
-            justify-content: space-around;
+            justify-content: center; /* Vertically centers matches regardless of round quantity */
             height: 100%;
-            min-height: 950px; /* Tall container layout to fit stacked vertical match tree blocks neatly */
+            min-height: 980px;
         }
         .bracket-column-title {
             text-align: center;
@@ -148,7 +147,13 @@
             padding: 8px;
             border-radius: 6px;
             font-size: 0.85em;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .bracket-match-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            flex-grow: 1; /* Distributes vertical blocks evenly per column depth */
         }
         .bracket-match-card {
             background: white;
@@ -156,7 +161,7 @@
             border-radius: 6px;
             padding: 6px 8px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            margin: 5px 0;
+            margin: 8px 0;
         }
         .bracket-team-line {
             display: flex;
@@ -168,12 +173,18 @@
         .bracket-team-line:first-child {
             border-bottom: 1px solid #edf2f7;
         }
+        .bracket-team-details {
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            white-space: nowrap;
+            margin-right: 8px;
+        }
         .bracket-team-name {
             font-weight: 600;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 130px;
         }
         .bracket-match-score {
             font-weight: bold;
@@ -183,6 +194,7 @@
             font-size: 0.8em;
             min-width: 14px;
             text-align: center;
+            flex-shrink: 0;
         }
         
         #loading {
@@ -194,8 +206,9 @@
         .placeholder-text {
             text-align: center;
             color: #718096;
-            padding: 40px 20px;
+            padding: 20px 10px;
             font-style: italic;
+            font-size: 0.85em;
         }
         .test-banner {
             background: #e53e3e;
@@ -341,22 +354,19 @@ async function generateStandings() {
         let allMatches = extractAllMatches(data);
         if (allMatches.length === 0) throw new Error('No match data');
 
-        // INJECT FULL TOURNAMENT ARCHITECTURE MOCK SIMULATION
         if (forceTestKO) {
-            document.getElementById('test-indicator').innerHTML = `<div class="test-banner">⚠️ BRACKET LAYOUT MODE ACTIVE (testko=true)</div>`;
+            document.getElementById('test-indicator').innerHTML = `<div class="test-banner">⚠️ BRACKET SIMULATION MODE (testko=true)</div>`;
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
 
-            // 1. Generate 16 Matches for Round of 32
             let r32Winners = [];
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
                 simulatedKO.push({ team1: t1, team2: t2, score: { ft: [2, 1] }, stageName: "Round of 32" });
-                r32Winners.push(t1); // Advance team 1 for simulation tree mapping
+                r32Winners.push(t1);
             }
 
-            // 2. Generate 8 Matches for Round of 16
             let r16Winners = [];
             for(let i = 0; i < 8; i++) {
                 let t1 = r32Winners[i*2];
@@ -365,7 +375,6 @@ async function generateStandings() {
                 r16Winners.push(t1);
             }
 
-            // 3. Generate 4 Matches for Quarter-finals
             let qfWinners = [];
             for(let i = 0; i < 4; i++) {
                 let t1 = r16Winners[i*2];
@@ -374,7 +383,6 @@ async function generateStandings() {
                 qfWinners.push(t1);
             }
 
-            // 4. Generate 2 Matches for Semi-finals
             let sfWinners = [];
             let sfLosers = [];
             for(let i = 0; i < 2; i++) {
@@ -385,7 +393,6 @@ async function generateStandings() {
                 sfLosers.push(t2);
             }
 
-            // 5. Generate Final & 3rd Place Match
             simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], score: { ft: [4, 3] }, stageName: "Match for third place" });
             simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], score: { ft: [1, 0] }, stageName: "Final" });
             
@@ -552,8 +559,11 @@ async function generateStandings() {
                 
                 column.innerHTML = `<div class="bracket-column-title">${stageName}</div>`;
                 
+                const matchContainer = document.createElement('div');
+                matchContainer.className = 'bracket-match-container';
+
                 if (stageMatches.length === 0) {
-                    column.innerHTML += `<div class="placeholder-text" style="font-size:0.8em; padding:10px;">Awaiting results</div>`;
+                    matchContainer.innerHTML = `<div class="placeholder-text">Awaiting results</div>`;
                 } else {
                     stageMatches.forEach(match => {
                         const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
@@ -563,20 +573,27 @@ async function generateStandings() {
                         const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
                         const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
 
-                        column.innerHTML += `
+                        matchContainer.innerHTML += `
                             <div class="bracket-match-card">
                                 <div class="bracket-team-line">
-                                    <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}${p1}</span>
+                                    <div class="bracket-team-details">
+                                        <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}</span>
+                                        ${p1}
+                                    </div>
                                     <span class="bracket-match-score">${s1}</span>
                                 </div>
                                 <div class="bracket-team-line">
-                                    <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}${p2}</span>
+                                    <div class="bracket-team-details">
+                                        <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}</span>
+                                        ${p2}
+                                    </div>
                                     <span class="bracket-match-score">${s2}</span>
                                 </div>
                             </div>
                         `;
                     });
                 }
+                column.appendChild(matchContainer);
                 koContainer.appendChild(column);
             });
         } else {
