@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Cup Sweepstake Standings</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        h1 {
+            color: #bb0000;
+            text-align: center;
+        }
+        .player-tag {
+            font-weight: bold;
+            color: #0066cc;
+            margin-left: 5px;
+            font-size: 0.9em;
+        }
+        #loading {
+            text-align: center;
+            font-size: 1.2em;
+            color: #666;
+            padding: 40px;
+        }
+        /* Style fixes to ensure BBC styles render nicely or adapt */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏆 World Cup Sweepstake Live Standings 🏆</h1>
+    <div id="loading">Fetching latest standings from BBC Sport...</div>
+    <div id="tables-container"></div>
+</div>
+
+<script>
+// Sweepstake data extracted from image_25d644.png
+const sweepstakeData = {
+    "France": "Alexis", "Curaçao": "Alexis", "Curacao": "Alexis",
+    "Spain": "Savir", "Haiti": "Savir",
+    "England": "Danny", "New Zealand": "Danny",
+    "Brazil": "Deji", "Panama": "Deji",
+    "Argentina": "Greg", "Uzbekistan": "Greg",
+    "Portugal": "Michaela", "Iraq": "Michaela",
+    "Germany": "Aleks", "Jordan": "Aleks",
+    "Netherlands": "Jason", "South Africa": "Jason",
+    "Norway": "Stoil", "Saudi Arabia": "Stoil",
+    "Belgium": "Lee", "DR Congo": "Lee", "Congo DR": "Lee",
+    "Colombia": "Will", "Iran": "Will",
+    "Uruguay": "Robbie", "Qatar": "Robbie",
+    "Switzerland": "Tommy", "Cabo Verde": "Tommy", "Cape Verde": "Tommy",
+    "USA": "Chris", "United States": "Chris", "Australia": "Chris",
+    "Mexico": "Anna", "Bosnia and Herzegovina": "Anna", "Bosnia-Herzegovina": "Anna",
+    "Croatia": "Arup", "Ghana": "Arup",
+    "Turkey": "Patrick", "Tunisia": "Patrick",
+    "Morocco": "Colin", "Algeria": "Colin",
+    "Senegal": "Matt", "Egypt": "Matt",
+    "Canada": "Angela", "Czechia": "Angela", "Czech Republic": "Angela",
+    "Ivory Coast": "Zuzana", "Côte d'Ivoire": "Zuzana", "South Korea": "Zuzana", "Korea Republic": "Zuzana",
+    "Japan": "Natalie", "Austria": "Natalie",
+    "Ecuador": "Jack", "Sweden": "Jack",
+    "Paraguay": "Steve", "Scotland": "Steve"
+};
+
+// URL to fetch from via an open CORS proxy
+const targetUrl = 'https://www.bbc.co.uk/sport/football/tables';
+const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(targetUrl);
+
+async function fetchAndModifyTables() {
+    try {
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        // allorigins returns the html inside data.contents
+        const htmlString = data.contents;
+
+        // Parse the HTML string into a DOM object
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlString, 'text/html');
+
+        // BBC tables are usually inside wrappers or table elements. Let's grab all tables.
+        const tables = doc.querySelectorAll('table');
+
+        if (tables.length === 0) {
+            document.getElementById('loading').innerText = "Could not find any tables. The BBC layout might have changed.";
+            return;
+        }
+
+        // Hide the loading message
+        document.getElementById('loading').style.display = 'none';
+        const container = document.getElementById('tables-container');
+
+        // Process tables and append player names
+        tables.forEach((table) => {
+            // Find all table cells or elements containing team names
+            // BBC often uses full team names inside acronyms or specific spans/links
+            const cells = table.querySelectorAll('td, th, span, a');
+            
+            cells.forEach(cell => {
+                // Check if text matches any team name exactly or closely
+                const text = cell.textContent.trim();
+                
+                if (sweepstakeData[text]) {
+                    // Avoid duplicating if we've already appended
+                    if (!cell.querySelector('.player-tag')) {
+                        const playerSpan = document.createElement('span');
+                        playerSpan.className = 'player-tag';
+                        playerSpan.innerText = ` (${sweepstakeData[text]})`;
+                        cell.appendChild(playerSpan);
+                    }
+                }
+            });
+
+            // Append the modified table to our container
+            container.appendChild(table);
+        });
+
+    } catch (error) {
+        console.error('Error fetching standings:', error);
+        document.getElementById('loading').innerText = "Failed to load standings. Please try refreshing or check CORS settings.";
+    }
+}
+
+// Run the script on load
+fetchAndModifyTables();
+</script>
+
+</body>
+</html>
