@@ -36,6 +36,7 @@
             display: flex;
             border-bottom: 2px solid #e1e4e8;
             margin-bottom: 25px;
+            overflow-x: auto;
         }
         .tab-button {
             padding: 12px 24px;
@@ -49,6 +50,7 @@
             transition: all 0.2s ease;
             border-bottom: 3px solid transparent;
             margin-bottom: -2px;
+            white-space: nowrap;
         }
         .tab-button:hover {
             color: #1a365d;
@@ -62,6 +64,53 @@
         }
         .tab-content.active {
             display: block;
+        }
+
+        /* Fixtures Layout Styles */
+        .fixtures-section {
+            margin-bottom: 30px;
+        }
+        .fixtures-section-title {
+            color: #1a365d;
+            border-bottom: 2px solid #edf2f7;
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .fixtures-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 15px;
+        }
+        .fixture-card {
+            background: #fff;
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .fixture-meta {
+            font-size: 0.8em;
+            color: #718096;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .fixture-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 6px 0;
+        }
+        .fixture-team {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         /* Group Tables CSS */
@@ -119,10 +168,10 @@
             font-size: 0.8em;
             margin-left: 4px;
             display: inline-block;
-            flex-shrink: 0; /* Prevents badge clipping */
+            flex-shrink: 0;
         }
 
-        /* Refined Visual Bracket Styles */
+        /* Bracket Styles */
         .bracket-wrapper {
             overflow-x: auto;
             padding: 20px 0;
@@ -135,7 +184,7 @@
         .bracket-column {
             display: flex;
             flex-direction: column;
-            justify-content: center; /* Vertically centers matches regardless of round quantity */
+            justify-content: center;
             height: 100%;
             min-height: 980px;
         }
@@ -153,7 +202,7 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
-            flex-grow: 1; /* Distributes vertical blocks evenly per column depth */
+            flex-grow: 1;
         }
         .bracket-match-card {
             background: white;
@@ -232,11 +281,16 @@
     <div id="loading">Gathering match data...</div>
 
     <div class="tabs" id="nav-tabs" style="display: none;">
-        <button class="tab-button active" onclick="switchTab('group-tab')">📊 Group Standings</button>
-        <button class="tab-button" onclick="switchTab('knockout-tab')">⚡ Knockout Round</button>
+        <button class="tab-button active" onclick="switchTab('fixtures-tab')">📅 Live Fixtures</button>
+        <button class="tab-button" onclick="switchTab('group-tab')">📊 Group Standings</button>
+        <button class="tab-button" onclick="switchTab('knockout-tab')">⚡ Knockout Stage</button>
     </div>
 
-    <div id="group-tab" class="tab-content active">
+    <div id="fixtures-tab" class="tab-content active">
+        <div id="fixtures-container"></div>
+    </div>
+
+    <div id="group-tab" class="tab-content">
         <div id="tables-container"></div>
     </div>
     
@@ -263,7 +317,7 @@ const sweepstakeData = {
     "Uruguay": "Robbie", "Qatar": "Robbie",
     "Switzerland": "Tommy", "Cabo Verde": "Tommy", "Cape Verde": "Tommy",
     "USA": "Chris", "United States": "Chris", "Australia": "Chris",
-    "Mexico": "Anna", "Bosnia and Herzegovina": "Anna", "Bosnia & Herzegovina": "Anna",
+    "Mexico": "Anna", "Bosnia and Herzegovina": "Anna", "Bosnia-Herzegovina": "Anna", "Bosnia & Herzegovina": "Anna",
     "Croatia": "Arup", "Ghana": "Arup",
     "Turkey": "Patrick", "Tunisia": "Patrick",
     "Morocco": "Colin", "Algeria": "Colin",
@@ -281,12 +335,19 @@ const urlParams = new URLSearchParams(window.location.search);
 const showDebug = urlParams.get('debug') === 'true';
 const forceTestKO = urlParams.get('testko') === 'true';
 
+// Setting system baseline current evaluation targets for 2026 World Cup matching
+const todayString = "2026-06-23"; 
+const yesterdayString = "2026-06-22";
+
 function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
     
     document.getElementById(tabId).classList.add('active');
-    const btnIndex = tabId === 'group-tab' ? 0 : 1;
+    
+    let btnIndex = 0;
+    if (tabId === 'group-tab') btnIndex = 1;
+    if (tabId === 'knockout-tab') btnIndex = 2;
     document.querySelectorAll('.tab-button')[btnIndex].classList.add('active');
 }
 
@@ -363,7 +424,7 @@ async function generateStandings() {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                simulatedKO.push({ team1: t1, team2: t2, score: { ft: [2, 1] }, stageName: "Round of 32" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, score: { ft: [2, 1] }, stageName: "Round of 32" });
                 r32Winners.push(t1);
             }
 
@@ -371,7 +432,7 @@ async function generateStandings() {
             for(let i = 0; i < 8; i++) {
                 let t1 = r32Winners[i*2];
                 let t2 = r32Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, score: { ft: [3, 2] }, stageName: "Round of 16" });
+                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, score: { ft: [3, 2] }, stageName: "Round of 16" });
                 r16Winners.push(t1);
             }
 
@@ -379,7 +440,7 @@ async function generateStandings() {
             for(let i = 0; i < 4; i++) {
                 let t1 = r16Winners[i*2];
                 let t2 = r16Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, score: { ft: [1, 0] }, stageName: "Quarter-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, score: { ft: [1, 0] }, stageName: "Quarter-finals" });
                 qfWinners.push(t1);
             }
 
@@ -388,13 +449,13 @@ async function generateStandings() {
             for(let i = 0; i < 2; i++) {
                 let t1 = qfWinners[i*2];
                 let t2 = qfWinners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, score: { ft: [2, 1] }, stageName: "Semi-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, score: { ft: [2, 1] }, stageName: "Semi-finals" });
                 sfWinners.push(t1);
                 sfLosers.push(t2);
             }
 
-            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], score: { ft: [4, 3] }, stageName: "Match for third place" });
-            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], score: { ft: [1, 0] }, stageName: "Final" });
+            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, score: { ft: [4, 3] }, stageName: "Match for third place" });
+            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, score: { ft: [1, 0] }, stageName: "Final" });
             
             allMatches = allMatches.concat(simulatedKO);
         }
@@ -413,10 +474,20 @@ async function generateStandings() {
         let completedGroupMatches = 0;
         let debugSamples = [];
 
+        const yesterdaysResults = [];
+        const todaysFixtures = [];
+
         allMatches.forEach((match, idx) => {
             const team1 = match.team1 || "TBD";
             const team2 = match.team2 || "TBD";
             const scoreInfo = parseScores(match);
+
+            // Filter out calendar matching timelines
+            if (match.date === yesterdayString) {
+                yesterdaysResults.push(match);
+            } else if (match.date === todayString) {
+                todaysFixtures.push(match);
+            }
 
             if (idx < 2 || (scoreInfo.hasScore && debugSamples.length < 3)) {
                 debugSamples.push({
@@ -473,6 +544,43 @@ async function generateStandings() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('nav-tabs').style.display = 'flex';
 
+        // 1. RENDER LIVE FIXTURES & RESULTS TAB
+        const fixturesContainer = document.getElementById('fixtures-container');
+        fixturesContainer.innerHTML = '';
+
+        const makeFixturesListHTML = (matchList, fallbackText) => {
+            if(matchList.length === 0) return `<div class="placeholder-text">${fallbackText}</div>`;
+            let html = '<div class="fixtures-grid">';
+            matchList.forEach(m => {
+                const p1 = sweepstakeData[m.team1] ? `<span class="player-tag">${sweepstakeData[m.team1]}</span>` : '';
+                const p2 = sweepstakeData[m.team2] ? `<span class="player-tag">${sweepstakeData[m.team2]}</span>` : '';
+                const sInfo = parseScores(m);
+                const s1 = sInfo.hasScore ? sInfo.score1 : '-';
+                const s2 = sInfo.hasScore ? sInfo.score2 : '-';
+                const label = m.group ? m.group : (m.stageName || "Tournament Match");
+
+                html += `
+                    <div class="fixture-card">
+                        <div class="fixture-meta"><span>📌 ${label}</span><span>${m.time || ''}</span></div>
+                        <div class="fixture-row">
+                            <div class="fixture-team">${m.team1 || 'TBD'} ${p1}</div>
+                            <div class="bracket-match-score">${s1}</div>
+                        </div>
+                        <div class="fixture-row">
+                            <div class="fixture-team">${m.team2 || 'TBD'} ${p2}</div>
+                            <div class="bracket-match-score">${s2}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            return html;
+        };
+
+        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">📆 Today's Fixtures (${todayString})</div>${makeFixturesListHTML(todaysFixtures, "No matches scheduled for today.")}</div>`;
+        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">⏮️ Yesterday's Results (${yesterdayString})</div>${makeFixturesListHTML(yesterdaysResults, "No matches recorded yesterday.")}</div>`;
+
+        // 2. RENDER GROUP TABLES
         const tablesContainer = document.getElementById('tables-container');
         tablesContainer.innerHTML = '';
 
@@ -543,7 +651,7 @@ async function generateStandings() {
             tablesContainer.appendChild(card);
         });
 
-        // GENERATE VISUAL BRACKET GRID LAYOUT
+        // 3. RENDER KNOCKOUT BRACKET STAGE
         const koContainer = document.getElementById('bracket-container');
         koContainer.innerHTML = '';
         
@@ -597,16 +705,7 @@ async function generateStandings() {
                 koContainer.appendChild(column);
             });
         } else {
-            document.getElementById('knockout-tab').innerHTML = `<div class="placeholder-text">Knockout bracket structures will adapt here dynamically as group matches conclude.</div>`;
-        }
-
-        const hasKnockoutsStarted = Object.values(knockoutStages).some(stage => 
-            stage.some(m => parseScores(m).hasScore)
-        );
-        const isGroupStageOver = totalGroupMatches > 0 && (completedGroupMatches >= totalGroupMatches);
-
-        if (isGroupStageOver || hasKnockoutsStarted || forceTestKO) {
-            switchTab('knockout-tab');
+            document.getElementById('knockout-tab').innerHTML = `<div class="placeholder-text">Knockout structures will adapt here dynamically as group matches conclude.</div>`;
         }
 
     } catch (error) {
