@@ -393,30 +393,52 @@ function formatUKDate(dateStr) {
     }
 }
 
-// Fixed London Local Time Parser (BST/GMT processing)
+// Robust London Time Parser handling custom offset variants like "16:00 UTC-4"
 function formatLondonTime(rawTime, rawDate) {
     if (!rawTime) return "";
     try {
-        // Clean out spaces or auxiliary chars from openfootball feed times
-        const cleanTime = rawTime.trim(); 
-        const dateString = rawDate || todayString;
+        const timeInput = rawTime.trim();
+        const dateInput = rawDate || todayString;
         
-        // Form a standards-compliant ISO string
-        const datetimeStr = `${dateString}T${cleanTime.includes(':') ? cleanTime : '00:00'}:00Z`;
-        const dateObj = new Date(datetimeStr);
+        // Match standard time array sequences (HH:MM)
+        const timeMatch = timeInput.match(/^(\d{2}):(\d{2})/);
+        if (!timeMatch) return timeInput;
         
-        if (isNaN(dateObj.getTime())) {
-            return cleanTime + " BST";
+        const hours = parseInt(timeMatch[1], 10);
+        const minutes = parseInt(timeMatch[2], 10);
+        
+        // Find timezone offset signature (e.g., UTC-4 or UTC+1)
+        let offsetMinutes = 0;
+        const utcMatch = timeInput.match(/UTC([+-]\d+)/);
+        if (utcMatch) {
+            const offsetHours = parseInt(utcMatch[1], 10);
+            offsetMinutes = offsetHours * 60;
         }
-        
-        return dateObj.toLocaleTimeString('en-GB', {
+
+        // Construct baseline Date object in UTC with explicit calculation adjustments
+        const parts = dateInput.split('-');
+        const utcDate = new Date(Date.UTC(
+            parseInt(parts[0], 10),
+            parseInt(parts[1], 10) - 1,
+            parseInt(parts[2], 10),
+            hours,
+            minutes
+        ));
+
+        // Shift by reverse offset context to scale match back to correct baseline absolute UTC timeline
+        if (offsetMinutes !== 0) {
+            utcDate.setMinutes(utcDate.getMinutes() - offsetMinutes);
+        }
+
+        // Format to native London local presentation standard
+        return utcDate.toLocaleTimeString('en-GB', {
             timeZone: 'Europe/London',
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
         }) + " BST";
     } catch(e) {
-        return rawTime + " BST";
+        return rawTime;
     }
 }
 
@@ -493,7 +515,7 @@ async function generateStandings() {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "18:00", score: { ft: [2, 1] }, stageName: "Round of 32" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: { ft: [2, 1] }, stageName: "Round of 32" });
                 r32Winners.push(t1);
             }
 
@@ -501,7 +523,7 @@ async function generateStandings() {
             for(let i = 0; i < 8; i++) {
                 let t1 = r32Winners[i*2];
                 let t2 = r32Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, time: "22:00", score: { ft: [3, 5] }, stageName: "Round of 16" });
+                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, time: "20:00 UTC-4", score: { ft: [3, 5] }, stageName: "Round of 16" });
                 r16Winners.push(t2);
             }
 
@@ -509,7 +531,7 @@ async function generateStandings() {
             for(let i = 0; i < 4; i++) {
                 let t1 = r16Winners[i*2];
                 let t2 = r16Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "15:00", score: { ft: [1, 0] }, stageName: "Quarter-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "15:00 UTC-5", score: { ft: [1, 0] }, stageName: "Quarter-finals" });
                 qfWinners.push(t1);
             }
 
@@ -518,13 +540,13 @@ async function generateStandings() {
             for(let i = 0; i < 2; i++) {
                 let t1 = qfWinners[i*2];
                 let t2 = qfWinners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "19:00", score: { ft: [2, 1] }, stageName: "Semi-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "19:00 UTC-4", score: { ft: [2, 1] }, stageName: "Semi-finals" });
                 sfWinners.push(t1);
                 sfLosers.push(t2);
             }
 
-            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, time: "16:00", score: { ft: [4, 3] }, stageName: "Match for third place" });
-            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, time: "20:00", score: { ft: [2, 3] }, stageName: "Final" });
+            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, time: "16:00 UTC-4", score: { ft: [4, 3] }, stageName: "Match for third place" });
+            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, time: "20:00 UTC-4", score: { ft: [2, 3] }, stageName: "Final" });
             
             allMatches = allMatches.concat(simulatedKO);
         }
@@ -632,7 +654,6 @@ async function generateStandings() {
                 const t1Won = sInfo.hasScore && (sInfo.score1 > sInfo.score2);
                 const t2Won = sInfo.hasScore && (sInfo.score2 > sInfo.score1);
 
-                // Note: Pushpin icon has been completely stripped out of metadata segment string
                 html += `
                     <div class="fixture-card">
                         <div class="fixture-meta"><span>${label}</span><span>${timeLabel}</span></div>
@@ -725,7 +746,7 @@ async function generateStandings() {
             tablesContainer.appendChild(card);
         });
 
-        // 3. RENDER KNOCKOUT STAGE WITH CORRECTED PARSING AND STYLE INHERITANCE
+        // 3. RENDER KNOCKOUT STAGE
         const koContainer = document.getElementById('bracket-container');
         koContainer.innerHTML = '';
         
@@ -758,7 +779,6 @@ async function generateStandings() {
                         const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
                         const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
 
-                        // Note: Checkmark strings have been removed from the text output details below
                         matchContainer.innerHTML += `
                             <div class="bracket-match-card">
                                 <div class="bracket-team-line ${t1Won ? 'winner-highlight' : ''}">
