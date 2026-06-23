@@ -1,37 +1,37 @@
-# 🏆 World Cup Sweepstake Standings Tracker
+# 🏆 World Cup Sweepstake Hub
 
-A lightweight, zero-dependency web application that displays live World Cup group standings and automatically tags each country with its assigned sweepstake player. 
-
-The site is built to run entirely in the browser and is optimized for hosting via GitHub Pages without encountering CORS (Cross-Origin Resource Sharing) restrictions.
-
-## 🚀 Live Demo
-View your tournament dashboard here: [https://pglithro.github.io/WC26/](https://pglithro.github.io/WC26/)
+An automated, client-side live dashboard designed to track tournament standings, daily matches, and a dynamic tournament tree mapped against an internal sweepstake player matrix.
 
 ---
 
-## 🛠️ How It Works
+## ✨ New Features in this Release
 
-1. **Live Data Fetching:** The app queries an open-source, CORS-friendly tournament data stream updated live on GitHub.
-2. **Dynamic Mapping:** A JavaScript configuration block maps every competing nation to a player based on your custom draft slips.
-3. **Automated Sorting:** The dashboard renders organized group cards, auto-calculating rankings dynamically by Points (Pts) and Goal Difference (GD).
+### 📅 Live Fixtures & Results Tab
+*   **Dynamic Matching:** Automatically extracts and segments matches played yesterday and scheduled for today based on the system anchor timeline.
+*   **London Local Time (BST):** Built-in timezone wrapper parsing UTC source datetimes automatically into Europe/London localized presentation formats.
+*   **Winner Highlights:** Completed matches dynamically check scorelines, instantly applying a green highlight theme (`.winner-highlight`) and a checkmark (`✓`) next to the winning side.
+
+### ⚡ Knockout Stage
+*   **Rebranded Engine:** Replaced the previous "Knockout Bracket" tracking modules with a structurally optimized **"Knockout Stage"** grid layout.
+*   **Adaptive Flow:** Columns scale fluidly from the Round of 32 down to the Final match, inheriting sweepstake data allocations and match winner alerts automatically.
 
 ---
 
-## 🎲 Customizing for Future Sweepstakes
+## 🛠️ Debugging & Simulation
 
-You can easily repurpose this codebase for future tournaments, different sports, or completely different player rosters. All modifications take place in a single dictionary block inside the `index.html` file.
+The dashboard contains fallback testing switches directly accessible through URL query string parameters:
 
-### Step-by-Step Roster Updates:
+| URL Parameter | Action |
+| :--- | :--- |
+| `?debug=true` | Injects an administrative log console above the standings table showing exact parsing structures and string match flags. |
+| `?testko=true` | Force-injects mock programmatic datasets across all brackets to easily test layout spacing, winner highlight states, and team progression flows. |
 
-1. Open your `index.html` file in a text editor.
-2. Scroll down to the `<script>` tag near the bottom and locate the `sweepstakeData` object:
+*Example layout test link:* `index.html?testko=true&debug=true`
 
-```javascript
-// Sweepstake configuration matching image_25d644.png
-const sweepstakeData = {
-    "France": "Alexis", 
-    "Curaçao": "Alexis",
-    "Spain": "Savir", 
-    "Haiti": "Savir",
-    // Add or modify your pairs here...
-};
+---
+
+## 🚀 Getting Started
+
+1. Save the dashboard code as `index.html`.
+2. Open `index.html` directly in any modern web browser. 
+3. *Note:* Ensure you have an active internet connection so the script can smoothly download the openfootball match arrays over public API endpoints.
