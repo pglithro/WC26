@@ -116,7 +116,7 @@
             white-space: nowrap;
         }
 
-        /* Winner Highlighting Style rule rules */
+        /* Winner Highlighting Style Rules */
         .winner-highlight {
             background-color: #f0fff4 !important;
             border-left: 3px solid #38a169;
@@ -370,14 +370,44 @@ function switchTab(tabId) {
     document.querySelectorAll('.tab-button')[btnIndex].classList.add('active');
 }
 
-// Format raw strings/times cleanly into London Time contexts
+// Convert YYYY-MM-DD to UK format e.g. "22nd June"
+function formatUKDate(dateStr) {
+    if (!dateStr) return "";
+    try {
+        const parts = dateStr.split('-');
+        if (parts.length !== 3) return dateStr;
+        
+        const day = parseInt(parts[2], 10);
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        
+        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        
+        let suffix = "th";
+        if (day === 1 || day === 21 || day === 31) suffix = "st";
+        else if (day === 2 || day === 22) suffix = "nd";
+        else if (day === 3 || day === 23) suffix = "rd";
+        
+        return `${day}${suffix} ${months[monthIndex]}`;
+    } catch(e) {
+        return dateStr;
+    }
+}
+
+// Fixed London Local Time Parser (BST/GMT processing)
 function formatLondonTime(rawTime, rawDate) {
     if (!rawTime) return "";
     try {
-        // Base parsing template assuming UTC data configurations standard to openfootball
-        const datetimeStr = `${rawDate || todayString}T${rawTime.length === 5 ? rawTime : '00:00'}:00Z`;
+        // Clean out spaces or auxiliary chars from openfootball feed times
+        const cleanTime = rawTime.trim(); 
+        const dateString = rawDate || todayString;
+        
+        // Form a standards-compliant ISO string
+        const datetimeStr = `${dateString}T${cleanTime.includes(':') ? cleanTime : '00:00'}:00Z`;
         const dateObj = new Date(datetimeStr);
-        if (isNaN(dateObj.getTime())) return rawTime;
+        
+        if (isNaN(dateObj.getTime())) {
+            return cleanTime + " BST";
+        }
         
         return dateObj.toLocaleTimeString('en-GB', {
             timeZone: 'Europe/London',
@@ -386,7 +416,7 @@ function formatLondonTime(rawTime, rawDate) {
             hour12: false
         }) + " BST";
     } catch(e) {
-        return rawTime;
+        return rawTime + " BST";
     }
 }
 
@@ -463,7 +493,7 @@ async function generateStandings() {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "17:00", score: { ft: [2, 1] }, stageName: "Round of 32" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "18:00", score: { ft: [2, 1] }, stageName: "Round of 32" });
                 r32Winners.push(t1);
             }
 
@@ -471,15 +501,15 @@ async function generateStandings() {
             for(let i = 0; i < 8; i++) {
                 let t1 = r32Winners[i*2];
                 let t2 = r32Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, time: "21:00", score: { ft: [3, 5] }, stageName: "Round of 16" });
-                r16Winners.push(t2); // Set team 2 as winner to test varied advancing branches
+                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, time: "22:00", score: { ft: [3, 5] }, stageName: "Round of 16" });
+                r16Winners.push(t2);
             }
 
             let qfWinners = [];
             for(let i = 0; i < 4; i++) {
                 let t1 = r16Winners[i*2];
                 let t2 = r16Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "14:00", score: { ft: [1, 0] }, stageName: "Quarter-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "15:00", score: { ft: [1, 0] }, stageName: "Quarter-finals" });
                 qfWinners.push(t1);
             }
 
@@ -488,13 +518,13 @@ async function generateStandings() {
             for(let i = 0; i < 2; i++) {
                 let t1 = qfWinners[i*2];
                 let t2 = qfWinners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "19:55", score: { ft: [2, 1] }, stageName: "Semi-finals" });
+                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "19:00", score: { ft: [2, 1] }, stageName: "Semi-finals" });
                 sfWinners.push(t1);
                 sfLosers.push(t2);
             }
 
-            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, time: "15:00", score: { ft: [4, 3] }, stageName: "Match for third place" });
-            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, time: "19:00", score: { ft: [2, 3] }, stageName: "Final" });
+            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, time: "16:00", score: { ft: [4, 3] }, stageName: "Match for third place" });
+            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, time: "20:00", score: { ft: [2, 3] }, stageName: "Final" });
             
             allMatches = allMatches.concat(simulatedKO);
         }
@@ -582,7 +612,7 @@ async function generateStandings() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('nav-tabs').style.display = 'flex';
 
-        // 1. RENDER LIVE FIXTURES & RESULTS TAB WITH LONDON TIME AND WINNER HIGHLIGHTING
+        // 1. RENDER LIVE FIXTURES & RESULTS TAB WITH LOCALIZED LAYOUT MODIFICATIONS
         const fixturesContainer = document.getElementById('fixtures-container');
         fixturesContainer.innerHTML = '';
 
@@ -602,15 +632,16 @@ async function generateStandings() {
                 const t1Won = sInfo.hasScore && (sInfo.score1 > sInfo.score2);
                 const t2Won = sInfo.hasScore && (sInfo.score2 > sInfo.score1);
 
+                // Note: Pushpin icon has been completely stripped out of metadata segment string
                 html += `
                     <div class="fixture-card">
-                        <div class="fixture-meta"><span>📌 ${label}</span><span>${timeLabel}</span></div>
+                        <div class="fixture-meta"><span>${label}</span><span>${timeLabel}</span></div>
                         <div class="fixture-row ${t1Won ? 'winner-highlight' : ''}">
-                            <div class="fixture-team">${m.team1 || 'TBD'} ${p1} ${t1Won ? '✓' : ''}</div>
+                            <div class="fixture-team">${m.team1 || 'TBD'} ${p1}</div>
                             <div class="bracket-match-score">${s1}</div>
                         </div>
                         <div class="fixture-row ${t2Won ? 'winner-highlight' : ''}">
-                            <div class="fixture-team">${m.team2 || 'TBD'} ${p2} ${t2Won ? '✓' : ''}</div>
+                            <div class="fixture-team">${m.team2 || 'TBD'} ${p2}</div>
                             <div class="bracket-match-score">${s2}</div>
                         </div>
                     </div>
@@ -620,8 +651,8 @@ async function generateStandings() {
             return html;
         };
 
-        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">📆 Today's Fixtures (${todayString})</div>${makeFixturesListHTML(todaysFixtures, "No matches scheduled for today.")}</div>`;
-        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">⏮️ Yesterday's Results (${yesterdayString})</div>${makeFixturesListHTML(yesterdaysResults, "No matches recorded yesterday.")}</div>`;
+        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">📆 Today's Fixtures (${formatUKDate(todayString)})</div>${makeFixturesListHTML(todaysFixtures, "No matches scheduled for today.")}</div>`;
+        fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">⏮️ Yesterday's Results (${formatUKDate(yesterdayString)})</div>${makeFixturesListHTML(yesterdaysResults, "No matches recorded yesterday.")}</div>`;
 
         // 2. RENDER GROUP TABLES
         const tablesContainer = document.getElementById('tables-container');
@@ -694,7 +725,7 @@ async function generateStandings() {
             tablesContainer.appendChild(card);
         });
 
-        // 3. RENDER KNOCKOUT STAGE WITH WINNER HIGHLIGHTS
+        // 3. RENDER KNOCKOUT STAGE WITH CORRECTED PARSING AND STYLE INHERITANCE
         const koContainer = document.getElementById('bracket-container');
         koContainer.innerHTML = '';
         
@@ -727,19 +758,20 @@ async function generateStandings() {
                         const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
                         const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
 
+                        // Note: Checkmark strings have been removed from the text output details below
                         matchContainer.innerHTML += `
                             <div class="bracket-match-card">
                                 <div class="bracket-team-line ${t1Won ? 'winner-highlight' : ''}">
                                     <div class="bracket-team-details">
                                         <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}</span>
-                                        ${p1} ${t1Won ? '✓' : ''}
+                                        ${p1}
                                     </div>
                                     <span class="bracket-match-score">${s1}</span>
                                 </div>
                                 <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
                                     <div class="bracket-team-details">
                                         <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}</span>
-                                        ${p2} ${t2Won ? '✓' : ''}
+                                        ${p2}
                                     </div>
                                     <span class="bracket-match-score">${s2}</span>
                                 </div>
