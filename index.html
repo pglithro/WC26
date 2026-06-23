@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Cup Sweepstake Standings</title>
+    <title>World Cup Sweepstake Hub</title>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -28,8 +28,43 @@
         .subtitle {
             text-align: center;
             color: #666;
-            margin-bottom: 30px;
+            margin-bottom: 25px;
         }
+        
+        /* Tab Navigation Styles */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e1e4e8;
+            margin-bottom: 25px;
+        }
+        .tab-button {
+            padding: 12px 24px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            outline: none;
+            font-size: 1.05em;
+            font-weight: 600;
+            color: #718096;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .tab-button:hover {
+            color: #1a365d;
+        }
+        .tab-button.active {
+            color: #1a365d;
+            border-bottom-color: #1a365d;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Standings Cards & Tables */
         .group-card {
             background: #fff;
             border: 1px solid #e1e4e8;
@@ -75,25 +110,80 @@
             margin-left: 8px;
             display: inline-block;
         }
+
+        /* Knockouts List */
+        .ko-stage {
+            background: #edf2f7;
+            padding: 12px;
+            font-weight: bold;
+            border-radius: 6px;
+            margin-top: 20px;
+            color: #2d3748;
+        }
+        .ko-match {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ko-team {
+            font-weight: 600;
+            flex: 1;
+        }
+        .ko-vs {
+            font-weight: bold;
+            color: #a0aec0;
+            padding: 0 15px;
+        }
+        .ko-score {
+            font-weight: bold;
+            background: #edf2f7;
+            padding: 2px 8px;
+            border-radius: 4px;
+            min-width: 20px;
+            text-align: center;
+        }
         #loading {
             text-align: center;
             font-size: 1.2em;
             color: #555;
             padding: 40px;
         }
+        .placeholder-text {
+            text-align: center;
+            color: #718096;
+            padding: 40px 20px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🏆 World Cup Sweepstake Standings 🏆</h1>
-    <div class="subtitle">Live Calculations via OpenFootball Stream</div>
-    <div id="loading">Calculating standings from live feed...</div>
-    <div id="tables-container"></div>
+    <h1>🏆 World Cup Sweepstake Hub 🏆</h1>
+    <div class="subtitle">Live Tracking Dashboard</div>
+    
+    <div id="loading">Gathering match data...</div>
+
+    <div class="tabs" id="nav-tabs" style="display: none;">
+        <button class="tab-button active" onclick="switchTab('group-tab')">📊 Group Standings</button>
+        <button class="tab-button" onclick="switchTab('knockout-tab')">⚡ Knockout Phase</button>
+    </div>
+
+    <div id="group-tab" class="tab-content active">
+        <div id="tables-container"></div>
+    </div>
+    
+    <div id="knockout-tab" class="tab-content">
+        <div id="knockout-container"></div>
+    </div>
 </div>
 
 <script>
-// Sweepstake data mapping from image_25d644.png
 const sweepstakeData = {
     "France": "Alexis", "Curaçao": "Alexis", "Curacao": "Alexis",
     "Spain": "Savir", "Haiti": "Savir",
@@ -123,22 +213,37 @@ const sweepstakeData = {
 
 const githubSource = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 
-// Helper function to recursively search for any match objects within the JSON structure
-function extractAllMatches(obj) {
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    
+    document.getElementById(tabId).classList.add('active');
+    // Set active button state
+    const btnIndex = tabId === 'group-tab' ? 0 : 1;
+    document.querySelectorAll('.tab-button')[btnIndex].classList.add('active');
+}
+
+function extractAllMatches(obj, currentRoundName = '') {
     let matches = [];
     if (!obj || typeof obj !== 'object') return matches;
     
+    let roundName = currentRoundName;
+    if (obj.name && (obj.name.includes('Round') || obj.name.includes('Quarter') || obj.name.includes('Semi') || obj.name.includes('Final'))) {
+        roundName = obj.name;
+    }
+
     if (Array.isArray(obj)) {
         obj.forEach(item => {
-            matches = matches.concat(extractAllMatches(item));
+            matches = matches.concat(extractAllMatches(item, roundName));
         });
     } else {
         if (obj.matches && Array.isArray(obj.matches)) {
+            obj.matches.forEach(m => m.stageName = roundName);
             matches = matches.concat(obj.matches);
         }
         for (const key in obj) {
             if (key !== 'matches' && typeof obj[key] === 'object') {
-                matches = matches.concat(extractAllMatches(obj[key]));
+                matches = matches.concat(extractAllMatches(obj[key], roundName));
             }
         }
     }
@@ -151,79 +256,71 @@ async function generateStandings() {
         if (!response.ok) throw new Error('Data fetch failed');
         const data = await response.json();
         
-        // Dynamically find all matches regardless of nesting schema (.rounds, .stages, etc.)
         const allMatches = extractAllMatches(data);
-        
-        if (allMatches.length === 0) {
-            throw new Error('No matches found in the retrieved JSON structure.');
-        }
+        if (allMatches.length === 0) throw new Error('No match data');
 
         const standings = {};
+        const knockoutStages = {};
+        
+        let totalGroupMatches = 0;
+        let completedGroupMatches = 0;
 
-        // Process matches
         allMatches.forEach(match => {
-            if (!match.group) return; // Only compile group matches
+            const team1 = match.team1 || "TBD";
+            const team2 = match.team2 || "TBD";
+            const hasScore = match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null;
 
-            const groupName = match.group;
-            const team1 = match.team1;
-            const team2 = match.team2;
+            if (match.group) {
+                totalGroupMatches++;
+                if (hasScore) completedGroupMatches++;
 
-            [team1, team2].forEach(team => {
-                if (!standings[team]) {
-                    standings[team] = { 
-                        name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 
-                    };
+                const groupName = match.group;
+                [team1, team2].forEach(team => {
+                    if (team === "TBD") return;
+                    if (!standings[team]) {
+                        standings[team] = { name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+                    }
+                });
+
+                if (hasScore) {
+                    const s1 = parseInt(match.score1);
+                    const s2 = parseInt(match.score2);
+
+                    standings[team1].played++; standings[team2].played++;
+                    standings[team1].gf += s1; standings[team1].ga += s2;
+                    standings[team2].gf += s2; standings[team2].ga += s1;
+
+                    if (s1 > s2) { standings[team1].won++; standings[team1].pts += 3; standings[team2].lost++; }
+                    else if (s1 < s2) { standings[team2].won++; standings[team2].pts += 3; standings[team1].lost++; }
+                    else { standings[team1].drawn++; standings[team2].drawn++; standings[team1].pts += 1; standings[team2].pts += 1; }
+                    
+                    standings[team1].gd = standings[team1].gf - standings[team1].ga;
+                    standings[team2].gd = standings[team2].gf - standings[team2].ga;
                 }
-            });
-
-            if (match.score1 !== undefined && match.score2 !== undefined && match.score1 !== null && match.score2 !== null) {
-                const s1 = parseInt(match.score1);
-                const s2 = parseInt(match.score2);
-
-                standings[team1].played++;
-                standings[team2].played++;
-                standings[team1].gf += s1;
-                standings[team1].ga += s2;
-                standings[team2].gf += s2;
-                standings[team2].ga += s1;
-
-                if (s1 > s2) {
-                    standings[team1].won++;
-                    standings[team1].pts += 3;
-                    standings[team2].lost++;
-                } else if (s1 < s2) {
-                    standings[team2].won++;
-                    standings[team2].pts += 3;
-                    standings[team1].lost++;
-                } else {
-                    standings[team1].drawn++;
-                    standings[team2].drawn++;
-                    standings[team1].pts += 1;
-                    standings[team2].pts += 1;
-                }
-                
-                standings[team1].gd = standings[team1].gf - standings[team1].ga;
-                standings[team2].gd = standings[team2].gf - standings[team2].ga;
+            } 
+            else if (match.stageName) {
+                if (!knockoutStages[match.stageName]) knockoutStages[match.stageName] = [];
+                knockoutStages[match.stageName].push(match);
             }
         });
 
-        // Split up calculations into groups
+        // HIDE LOADING STATE & SHOW TABS
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('nav-tabs').style.display = 'flex';
+
+        // --- RENDER GROUP TABLES ---
         const groups = {};
         Object.values(standings).forEach(team => {
             if (!groups[team.group]) groups[team.group] = [];
             groups[team.group].push(team);
         });
 
-        // Empty container and remove loading message
-        document.getElementById('loading').style.display = 'none';
-        const container = document.getElementById('tables-container');
-        container.innerHTML = '';
+        const tablesContainer = document.getElementById('tables-container');
+        tablesContainer.innerHTML = '';
 
-        // Render sorted groups
         Object.keys(groups).sort().forEach(groupName => {
             const card = document.createElement('div');
             card.className = 'group-card';
-            
             const teamsInGroup = groups[groupName];
             teamsInGroup.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
 
@@ -231,46 +328,67 @@ async function generateStandings() {
             teamsInGroup.forEach((team, index) => {
                 const player = sweepstakeData[team.name] || '';
                 const playerBadge = player ? `<span class="player-tag">${player}</span>` : '';
-
                 tableRows += `
                     <tr>
                         <td style="width: 40px; font-weight: bold; color: #888;">${index + 1}</td>
                         <td style="font-weight: 600;">${team.name} ${playerBadge}</td>
-                        <td>${team.played}</td>
-                        <td>${team.won}</td>
-                        <td>${team.drawn}</td>
-                        <td>${team.lost}</td>
+                        <td>${team.played}</td><td>${team.won}</td><td>${team.drawn}</td><td>${team.lost}</td>
                         <td>${team.gd > 0 ? '+' + team.gd : team.gd}</td>
                         <td style="font-weight: bold; color: #1a365d;">${team.pts}</td>
-                    </tr>
-                `;
+                    </tr>`;
             });
 
-            card.innerHTML = `
-                <div class="group-header">${groupName}</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Pos</th>
-                            <th>Team</th>
-                            <th>P</th>
-                            <th>W</th>
-                            <th>D</th>
-                            <th>L</th>
-                            <th>GD</th>
-                            <th>Pts</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows}
-                    </tbody>
-                </table>
-            `;
-            container.appendChild(card);
+            card.innerHTML = `<div class="group-header">${groupName}</div><table><thead><tr><th>Pos</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+            tablesContainer.appendChild(card);
         });
 
+        // --- RENDER KNOCKOUT BRACKET LIST ---
+        const koContainer = document.getElementById('knockout-container');
+        koContainer.innerHTML = '';
+        
+        if (Object.keys(knockoutStages).length > 0) {
+            for (const stageName in knockoutStages) {
+                const stageHeader = document.createElement('div');
+                stageHeader.className = 'ko-stage';
+                stageHeader.innerText = stageName;
+                koContainer.appendChild(stageHeader);
+
+                knockoutStages[stageName].forEach(match => {
+                    const p1 = sweepstakeData[match.team1] ? ` <span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
+                    const p2 = sweepstakeData[match.team2] ? ` <span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
+                    
+                    const s1 = match.score1 !== undefined && match.score1 !== null ? match.score1 : '-';
+                    const s2 = match.score2 !== undefined && match.score2 !== null ? match.score2 : '-';
+
+                    const matchRow = document.createElement('div');
+                    matchRow.className = 'ko-match';
+                    matchRow.innerHTML = `
+                        <div class="ko-team">${match.team1 || 'TBD'}${p1}</div>
+                        <div class="ko-score">${s1}</div>
+                        <div class="ko-vs">vs</div>
+                        <div class="ko-score">${s2}</div>
+                        <div class="ko-team" style="text-align: right;">${match.team2 || 'TBD'}${p2}</div>
+                    `;
+                    koContainer.appendChild(matchRow);
+                });
+            }
+        } else {
+            koContainer.innerHTML = `<div class="placeholder-text">Knockout stages will appear here as soon as the group stages conclude.</div>`;
+        }
+
+        // --- SMART DEFAULT TAB SWITCH ---
+        // Switch tab to knockouts if all group matches are done, or if a knockout match has started
+        const hasKnockoutsStarted = Object.values(knockoutStages).some(stage => 
+            stage.some(m => m.score1 !== undefined && m.score1 !== null)
+        );
+        const isGroupStageOver = totalGroupMatches > 0 && (completedGroupMatches >= totalGroupMatches);
+
+        if (isGroupStageOver || hasKnockoutsStarted) {
+            switchTab('knockout-tab');
+        }
+
     } catch (error) {
-        document.getElementById('loading').innerText = "❌ Structural mapping error. Unable to parse matches.";
+        document.getElementById('loading').innerText = "❌ Error rendering data feed.";
         console.error(error);
     }
 }
