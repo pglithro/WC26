@@ -349,8 +349,13 @@ const urlParams = new URLSearchParams(window.location.search);
 const showDebug = urlParams.get('debug') === 'true';
 const forceTestKO = urlParams.get('testko') === 'true';
 
-const todayString = "2026-06-23"; 
-const yesterdayString = "2026-06-22";
+// Automatically calculates the current date and yesterday's date in YYYY-MM-DD format
+const todayObj = new Date();
+const todayString = todayObj.toISOString().split('T')[0];
+
+const yesterdayObj = new Date();
+yesterdayObj.setDate(todayObj.getDate() - 1);
+const yesterdayString = yesterdayObj.toISOString().split('T')[0];
 
 function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
