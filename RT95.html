@@ -439,8 +439,15 @@ function extractAllMatches(obj, currentRoundName = '') {
     if (!obj || typeof obj !== 'object') return matches;
     
     let roundName = currentRoundName;
-    if (obj.name && (obj.name.includes('Round of 32') || obj.name.includes('Round of 16') || obj.name.includes('Quarter') || obj.name.includes('Semi') || obj.name.includes('Final'))) {
-        roundName = obj.name;
+    
+    // Catch common knockout identifiers from the round structure safely
+    if (obj.name && typeof obj.name === 'string') {
+        const nameLower = obj.name.toLowerCase();
+        if (nameLower.includes('32') || nameLower.includes('16') || 
+            nameLower.includes('quarter') || nameLower.includes('semi') || 
+            nameLower.includes('final')) {
+            roundName = obj.name;
+        }
     }
 
     if (Array.isArray(obj)) {
@@ -449,7 +456,18 @@ function extractAllMatches(obj, currentRoundName = '') {
         });
     } else {
         if (obj.matches && Array.isArray(obj.matches)) {
-            obj.matches.forEach(m => m.stageName = roundName);
+            obj.matches.forEach(m => {
+                // If a round property exists directly on the match object, map it to stageName
+                if (m.round && !m.stageName) {
+                    m.stageName = m.round;
+                } else if (!m.stageName) {
+                    m.stageName = roundName;
+                }
+                
+                if (obj.name && obj.name.toLowerCase().includes('group')) {
+                    m.group = obj.name;
+                }
+            });
             matches = matches.concat(obj.matches);
         }
         for (const key in obj) {
