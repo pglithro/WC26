@@ -354,13 +354,15 @@ const urlParams = new URLSearchParams(window.location.search);
 const showDebug = urlParams.get('debug') === 'true';
 const forceTestKO = urlParams.get('testko') === 'true';
 
-// Automatically calculates the current date and yesterday's date in YYYY-MM-DD format
 const todayObj = new Date();
 const todayString = todayObj.toISOString().split('T')[0];
 
 const yesterdayObj = new Date();
 yesterdayObj.setDate(todayObj.getDate() - 1);
 const yesterdayString = yesterdayObj.toISOString().split('T')[0];
+
+// Store tracking states for column manual expansion override toggles
+const bracketCollapseState = {};
 
 function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -374,17 +376,14 @@ function switchTab(tabId) {
     document.querySelectorAll('.tab-button')[btnIndex].classList.add('active');
 }
 
-// Convert YYYY-MM-DD to UK format e.g. "22nd June"
 function formatUKDate(dateStr) {
     if (!dateStr) return "";
     try {
         const parts = dateStr.split('-');
         if (parts.length !== 3) return dateStr;
-        
         const day = parseInt(parts[2], 10);
         const monthIndex = parseInt(parts[1], 10) - 1;
-        
-        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         
         let suffix = "th";
         if (day === 1 || day === 21 || day === 31) suffix = "st";
@@ -392,34 +391,27 @@ function formatUKDate(dateStr) {
         else if (day === 3 || day === 23) suffix = "rd";
         
         return `${day}${suffix} ${months[monthIndex]}`;
-    } catch(e) {
+    } catch (e) {
         return dateStr;
     }
 }
 
-// Robust London Time Parser handling custom offset variants like "16:00 UTC-4"
-function formatLondonTime(rawTime, rawDate) {
-    if (!rawTime) return "";
+function convertLocalBST(dateInput, timeInput) {
+    if (!timeInput) return "";
     try {
-        const timeInput = rawTime.trim();
-        const dateInput = rawDate || todayString;
-        
-        // Match standard time array sequences (HH:MM)
         const timeMatch = timeInput.match(/^(\d{2}):(\d{2})/);
         if (!timeMatch) return timeInput;
         
         const hours = parseInt(timeMatch[1], 10);
         const minutes = parseInt(timeMatch[2], 10);
         
-        // Find timezone offset signature (e.g., UTC-4 or UTC+1)
         let offsetMinutes = 0;
         const utcMatch = timeInput.match(/UTC([+-]\d+)/);
         if (utcMatch) {
             const offsetHours = parseInt(utcMatch[1], 10);
             offsetMinutes = offsetHours * 60;
         }
-
-        // Construct baseline Date object in UTC with explicit calculation adjustments
+        
         const parts = dateInput.split('-');
         const utcDate = new Date(Date.UTC(
             parseInt(parts[0], 10),
@@ -428,13 +420,11 @@ function formatLondonTime(rawTime, rawDate) {
             hours,
             minutes
         ));
-
-        // Shift by reverse offset context to scale match back to correct baseline absolute UTC timeline
+        
         if (offsetMinutes !== 0) {
             utcDate.setMinutes(utcDate.getMinutes() - offsetMinutes);
         }
-
-        // Format to native London local presentation standard
+        
         return utcDate.toLocaleTimeString('en-GB', {
             timeZone: 'Europe/London',
             hour: '2-digit',
@@ -442,7 +432,7 @@ function formatLondonTime(rawTime, rawDate) {
             hour12: false
         }) + " BST";
     } catch(e) {
-        return rawTime;
+        return timeInput;
     }
 }
 
@@ -452,7 +442,6 @@ function extractAllMatches(obj, currentRoundName = '') {
     
     let roundName = currentRoundName;
     
-    // Catch common knockout identifiers from the round structure safely
     if (obj.name && typeof obj.name === 'string') {
         const nameLower = obj.name.toLowerCase();
         if (nameLower.includes('32') || nameLower.includes('16') || 
@@ -469,7 +458,6 @@ function extractAllMatches(obj, currentRoundName = '') {
     } else {
         if (obj.matches && Array.isArray(obj.matches)) {
             obj.matches.forEach(m => {
-                // If a round property exists directly on the match object, map it to stageName
                 if (m.round && !m.stageName) {
                     m.stageName = m.round;
                 } else if (!m.stageName) {
@@ -492,200 +480,117 @@ function extractAllMatches(obj, currentRoundName = '') {
 }
 
 function parseScores(match) {
-    let s1 = null;
-    let s2 = null;
-
-    if (match.score1 !== undefined && match.score1 !== null && match.score1 !== "") s1 = match.score1;
-    if (match.score2 !== undefined && match.score2 !== null && match.score2 !== "") s2 = match.score2;
-
-    if (s1 === null && match.score) {
-        if (match.score.ft && Array.isArray(match.score.ft)) {
-            s1 = match.score.ft[0];
-            s2 = match.score.ft[1];
-        } else if (match.score.fulltime && Array.isArray(match.score.fulltime)) {
-            s1 = match.score.fulltime[0];
-            s2 = match.score.fulltime[1];
-        } else if (match.score.score1 !== undefined && match.score.score1 !== null) {
-            s1 = match.score.score1;
-            s2 = match.score.score2;
-        }
+    if (match.score && match.score.ft && Array.isArray(match.score.ft)) {
+        return {
+            hasScore: true,
+            score1: match.score.ft[0],
+            score2: match.score.ft[1],
+            rawSource: match.score
+        };
     }
+    return { hasScore: false, score1: null, score2: null, rawSource: match.score || null };
+}
 
-    return {
-        hasScore: (s1 !== null && s2 !== null && s1 !== "" && s2 !== "" && !isNaN(parseInt(s1)) && !isNaN(parseInt(s2))),
-        score1: parseInt(s1),
-        score2: parseInt(s2),
-        rawSource: match.score || { score1: match.score1, score2: match.score2 }
-    };
+function getMatchWinner(match) {
+    const scoreInfo = parseScores(match);
+    if (!scoreInfo.hasScore) return null;
+    if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
+    if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
+    
+    // Penalties check if scores are level
+    if (match.score && match.score.ps && Array.isArray(match.score.ps)) {
+        if (match.score.ps[0] > match.score.ps[1]) return match.team1;
+        if (match.score.ps[1] > match.score.ps[0]) return match.team2;
+    }
+    return null;
+}
+
+// Global toggle for collapsing or manual overrides
+function toggleBracketColumn(stageKey) {
+    bracketCollapseState[stageKey] = !bracketCollapseState[stageKey];
+    // Re-trigger layout mapping
+    window.lastFetchedData ? renderData(window.lastFetchedData) : location.reload();
 }
 
 async function generateStandings() {
     try {
         const response = await fetch(githubSource);
-        if (!response.ok) throw new Error('Data fetch failed');
+        if (!response.ok) throw new Error('Network error loading data');
         const data = await response.json();
-        
+        window.lastFetchedData = data; 
+        renderData(data);
+    } catch (error) {
+        document.getElementById('loading').innerText = "❌ Failed to connect to live match servers.";
+        console.error(error);
+    }
+}
+
+function renderData(data) {
+    try {
         let allMatches = extractAllMatches(data);
-        if (allMatches.length === 0) throw new Error('No match data');
+        if (allMatches.length === 0) throw new Error('No match data found');
 
         if (forceTestKO) {
             document.getElementById('test-indicator').innerHTML = `<div class="test-banner">⚠️ BRACKET SIMULATION MODE (testko=true)</div>`;
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
-
+            
             let r32Winners = [];
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: { ft: [2, 1] }, stageName: "Round of 32" });
+                simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: { ft: [2, 1] }, stageName: "Round of 32" });
                 r32Winners.push(t1);
             }
-
             let r16Winners = [];
             for(let i = 0; i < 8; i++) {
-                let t1 = r32Winners[i*2];
-                let t2 = r32Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: yesterdayString, time: "20:00 UTC-4", score: { ft: [3, 5] }, stageName: "Round of 16" });
-                r16Winners.push(t2);
+                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", score: { ft: [0, 2] }, stageName: "Round of 16" });
+                r16Winners.push(`W${66 + (i*2)}`); 
             }
-
-            let qfWinners = [];
             for(let i = 0; i < 4; i++) {
-                let t1 = r16Winners[i*2];
-                let t2 = r16Winners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "15:00 UTC-5", score: { ft: [1, 0] }, stageName: "Quarter-finals" });
-                qfWinners.push(t1);
+                simulatedKO.push({ num: 89 + i, team1: `W${81 + (i*2)}`, team2: `W${82 + (i*2)}`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
             }
-
-            let sfWinners = [];
-            let sfLosers = [];
-            for(let i = 0; i < 2; i++) {
-                let t1 = qfWinners[i*2];
-                let t2 = qfWinners[i*2 + 1];
-                simulatedKO.push({ team1: t1, team2: t2, date: todayString, time: "19:00 UTC-4", score: { ft: [2, 1] }, stageName: "Semi-finals" });
-                sfWinners.push(t1);
-                sfLosers.push(t2);
-            }
-
-            simulatedKO.push({ team1: sfLosers[0], team2: sfLosers[1], date: todayString, time: "16:00 UTC-4", score: { ft: [4, 3] }, stageName: "Match for third place" });
-            simulatedKO.push({ team1: sfWinners[0], team2: sfWinners[1], date: todayString, time: "20:00 UTC-4", score: { ft: [2, 3] }, stageName: "Final" });
+            simulatedKO.push({ num: 93, team1: "W89", team2: "W90", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
+            simulatedKO.push({ num: 94, team1: "W91", team2: "W92", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
+            simulatedKO.push({ num: 95, team1: "W93", team2: "W94", date: todayString, time: "19:00 UTC-5", stageName: "Final" });
             
-            allMatches = allMatches.concat(simulatedKO);
+            allMatches = allMatches.filter(m => m.group).concat(simulatedKO);
         }
-
-        const standings = {};
-        const knockoutStages = {
-            "Round of 32": [],
-            "Round of 16": [],
-            "Quarter-finals": [],
-            "Semi-finals": [],
-            "Match for third place": [],
-            "Final": []
-        };
-        
-        let totalGroupMatches = 0;
-        let completedGroupMatches = 0;
-        let debugSamples = [];
-
-        const yesterdaysResults = [];
-        const todaysFixtures = [];
-
-        allMatches.forEach((match, idx) => {
-            const team1 = match.team1 || "TBD";
-            const team2 = match.team2 || "TBD";
-            const scoreInfo = parseScores(match);
-
-            if (match.date === yesterdayString) {
-                yesterdaysResults.push(match);
-            } else if (match.date === todayString) {
-                todaysFixtures.push(match);
-            }
-
-            if (idx < 2 || (scoreInfo.hasScore && debugSamples.length < 3)) {
-                debugSamples.push({
-                    teams: `${team1} vs ${team2}`,
-                    rawJSONScore: JSON.stringify(scoreInfo.rawSource),
-                    interpretedHasScore: scoreInfo.hasScore,
-                    interpretedValues: `score1: ${scoreInfo.score1}, score2: ${scoreInfo.score2}`
-                });
-            }
-
-            if (match.group) {
-                totalGroupMatches++;
-                if (scoreInfo.hasScore) completedGroupMatches++;
-
-                const groupName = match.group;
-                [team1, team2].forEach(team => {
-                    if (team === "TBD") return;
-                    if (!standings[team]) {
-                        standings[team] = { name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
-                    }
-                });
-
-                if (scoreInfo.hasScore) {
-                    const s1 = scoreInfo.score1;
-                    const s2 = scoreInfo.score2;
-
-                    standings[team1].played++; standings[team2].played++;
-                    standings[team1].gf += s1; standings[team1].ga += s2;
-                    standings[team2].gf += s2; standings[team2].ga += s1;
-
-                    if (s1 > s2) { standings[team1].won++; standings[team1].pts += 3; standings[team2].lost++; }
-                    else if (s1 < s2) { standings[team2].won++; standings[team2].pts += 3; standings[team1].lost++; }
-                    else { standings[team1].drawn++; standings[team2].drawn++; standings[team1].pts += 1; standings[team2].pts += 1; }
-                    
-                    standings[team1].gd = standings[team1].gf - standings[team1].ga;
-                    standings[team2].gd = standings[team2].gf - standings[team2].ga;
-                }
-            } 
-            else if (match.stageName) {
-                let standardStageKey = null;
-                if (match.stageName.includes("32")) standardStageKey = "Round of 32";
-                else if (match.stageName.includes("16")) standardStageKey = "Round of 16";
-                else if (match.stageName.toLowerCase().includes("quarter")) standardStageKey = "Quarter-finals";
-                else if (match.stageName.toLowerCase().includes("semi")) standardStageKey = "Semi-finals";
-                else if (match.stageName.toLowerCase().includes("third") || match.stageName.toLowerCase().includes("3rd")) standardStageKey = "Match for third place";
-                else if (match.stageName.toLowerCase().includes("final")) standardStageKey = "Final";
-                
-                if (standardStageKey) {
-                    knockoutStages[standardStageKey].push(match);
-                }
-            }
-        });
 
         document.getElementById('loading').style.display = 'none';
         document.getElementById('nav-tabs').style.display = 'flex';
 
-        // 1. RENDER LIVE FIXTURES & RESULTS TAB WITH LOCALIZED LAYOUT MODIFICATIONS
+        // 1. RENDER LIVE FIXTURES
+        const todaysFixtures = allMatches.filter(m => m.date === todayString);
+        const yesterdaysResults = allMatches.filter(m => m.date === yesterdayString);
         const fixturesContainer = document.getElementById('fixtures-container');
         fixturesContainer.innerHTML = '';
 
-        const makeFixturesListHTML = (matchList, fallbackText) => {
-            if(matchList.length === 0) return `<div class="placeholder-text">${fallbackText}</div>`;
+        const makeFixturesListHTML = (list, fallbackText) => {
+            if (list.length === 0) return `<div class="placeholder-text">${fallbackText}</div>`;
             let html = '<div class="fixtures-grid">';
-            matchList.forEach(m => {
-                const p1 = sweepstakeData[m.team1] ? `<span class="player-tag">${sweepstakeData[m.team1]}</span>` : '';
-                const p2 = sweepstakeData[m.team2] ? `<span class="player-tag">${sweepstakeData[m.team2]}</span>` : '';
-                const sInfo = parseScores(m);
-                const s1 = sInfo.hasScore ? sInfo.score1 : '-';
-                const s2 = sInfo.hasScore ? sInfo.score2 : '-';
-                const label = m.group ? m.group : (m.stageName || "Tournament Match");
+            list.forEach(match => {
+                const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
+                const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
+                const scoreInfo = parseScores(match);
+                const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
+                const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
+                const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
+                const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
                 
-                const timeLabel = m.time ? formatLondonTime(m.time, m.date) : '';
-
-                const t1Won = sInfo.hasScore && (sInfo.score1 > sInfo.score2);
-                const t2Won = sInfo.hasScore && (sInfo.score2 > sInfo.score1);
-
                 html += `
                     <div class="fixture-card">
-                        <div class="fixture-meta"><span>${label}</span><span>${timeLabel}</span></div>
+                        <div class="fixture-meta">
+                            <span>${match.group || match.stageName || 'Knockout Stage'}</span>
+                            <span>${convertLocalBST(match.date, match.time)}</span>
+                        </div>
                         <div class="fixture-row ${t1Won ? 'winner-highlight' : ''}">
-                            <div class="fixture-team">${m.team1 || 'TBD'} ${p1}</div>
-                            <div class="bracket-match-score">${s1}</div>
+                            <div class="fixture-team" title="${match.team1}">${match.team1} ${p1}</div>
+                            <span class="bracket-match-score">${s1}</span>
                         </div>
                         <div class="fixture-row ${t2Won ? 'winner-highlight' : ''}">
-                            <div class="fixture-team">${m.team2 || 'TBD'} ${p2}</div>
-                            <div class="bracket-match-score">${s2}</div>
+                            <div class="fixture-team" title="${match.team2}">${match.team2} ${p2}</div>
+                            <span class="bracket-match-score">${s2}</span>
                         </div>
                     </div>
                 `;
@@ -698,27 +603,48 @@ async function generateStandings() {
         fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">⏮️ Yesterday's Results (${formatUKDate(yesterdayString)})</div>${makeFixturesListHTML(yesterdaysResults, "No matches recorded yesterday.")}</div>`;
 
         // 2. RENDER GROUP TABLES
+        const standings = {};
+        let totalGroupMatches = 0;
+        let completedGroupMatches = 0;
+        
+        allMatches.forEach(match => {
+            const scoreInfo = parseScores(match);
+            const team1 = match.team1;
+            const team2 = match.team2;
+            if (match.group) {
+                totalGroupMatches++;
+                if (scoreInfo.hasScore) completedGroupMatches++;
+                const groupName = match.group;
+                [team1, team2].forEach(team => {
+                    if (!team || team === "TBD") return;
+                    if (!standings[team]) {
+                        standings[team] = { name: team, group: groupName, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
+                    }
+                });
+                if (scoreInfo.hasScore && team1 && team2 && team1 !== "TBD" && team2 !== "TBD") {
+                    const s1 = scoreInfo.score1;
+                    const s2 = scoreInfo.score2;
+                    standings[team1].played++;
+                    standings[team2].played++;
+                    standings[team1].gf += s1;
+                    standings[team1].ga += s2;
+                    standings[team2].gf += s2;
+                    standings[team2].ga += s1;
+                    if (s1 > s2) {
+                        standings[team1].won++; standings[team1].pts += 3; standings[team2].lost++;
+                    } else if (s1 < s2) {
+                        standings[team2].won++; standings[team2].pts += 3; standings[team1].lost++;
+                    } else {
+                        standings[team1].drawn++; standings[team2].drawn++; standings[team1].pts += 1; standings[team2].pts += 1;
+                    }
+                    standings[team1].gd = standings[team1].gf - standings[team1].ga;
+                    standings[team2].gd = standings[team2].gf - standings[team2].ga;
+                }
+            }
+        });
+
         const tablesContainer = document.getElementById('tables-container');
         tablesContainer.innerHTML = '';
-
-        if (showDebug) {
-            tablesContainer.innerHTML = `
-                <div style="background: #1a202c; color: #a0aec0; font-family: monospace; padding: 15px; margin-bottom: 25px; border-radius: 6px; font-size: 0.9em; line-height: 1.5em;">
-                    <b style="color: #ecc94b;">🔍 LIVE STREAM DEBUGGER CONSOLE:</b><br>
-                    Total matches processed: ${allMatches.length}<br>
-                    Group matches identifying valid scores: ${completedGroupMatches} / ${totalGroupMatches}<br><br>
-                    <b style="color: #fff;">Stream Variable Extraction Logs:</b><br>
-                    ${debugSamples.map(s => `
-                        • Matchup: ${s.teams}<br>
-                        &nbsp;&nbsp;Raw Object structure found: <span style="color: #cbd5e0;">${s.rawJSONScore}</span><br>
-                        &nbsp;&nbsp;Result interpreted as scored?: <span style="color:${s.interpretedHasScore ? '#48bb78':'#f56565'}">${s.interpretedHasScore}</span> (${s.interpretedValues})<br>
-                    `).join('<br>')}
-                </div>
-            `;
-        }
-
-        tablesContainer.innerHTML += `<h2>📊 Group Standings</h2>`;
-
         const groups = {};
         Object.values(standings).forEach(team => {
             if (!groups[team.group]) groups[team.group] = [];
@@ -726,102 +652,220 @@ async function generateStandings() {
         });
 
         Object.keys(groups).sort().forEach(groupName => {
-            const card = document.createElement('div');
-            card.className = 'group-card';
-            const teamsInGroup = groups[groupName];
-            teamsInGroup.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
-
-            let tableRows = '';
-            teamsInGroup.forEach((team, index) => {
-                const player = sweepstakeData[team.name] || '';
-                const playerBadge = player ? `<span class="player-tag">${player}</span>` : '';
-                tableRows += `
+            const groupTeams = groups[groupName];
+            groupTeams.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
+            
+            let tableHTML = `
+                <div class="group-card">
+                    <div class="group-header">${groupName}</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="col-pos">Pos</th>
+                                <th class="col-team">Team</th>
+                                <th class="col-stat">P</th>
+                                <th class="col-stat">W</th>
+                                <th class="col-stat">D</th>
+                                <th class="col-stat">L</th>
+                                <th class="col-stat">GD</th>
+                                <th class="col-pts">Pts</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            groupTeams.forEach((team, index) => {
+                const pTag = sweepstakeData[team.name] ? `<span class="player-tag">${sweepstakeData[team.name]}</span>` : '';
+                tableHTML += `
                     <tr>
-                        <td class="col-pos" style="font-weight: bold; color: #888;">${index + 1}</td>
-                        <td class="col-team" style="font-weight: 600;">${team.name} ${playerBadge}</td>
-                        <td class="col-stat">${team.played}</td>
-                        <td class="col-stat">${team.won}</td>
-                        <td class="col-stat">${team.drawn}</td>
-                        <td class="col-stat">${team.lost}</td>
-                        <td class="col-stat">${team.gd > 0 ? '+' + team.gd : team.gd}</td>
+                        <td>${index + 1}</td>
+                        <td style="text-align: left; font-weight: 500;">${team.name} ${pTag}</td>
+                        <td>${team.played}</td>
+                        <td>${team.won}</td>
+                        <td>${team.drawn}</td>
+                        <td>${team.lost}</td>
+                        <td>${team.gd > 0 ? '+' + team.gd : team.gd}</td>
                         <td class="col-pts">${team.pts}</td>
-                    </tr>`;
+                    </tr>
+                `;
             });
-
-            card.innerHTML += `
-                <div class="group-header">${groupName}</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="col-pos">Pos</th>
-                            <th class="col-team">Team</th>
-                            <th class="col-stat">P</th>
-                            <th class="col-stat">W</th>
-                            <th class="col-stat">D</th>
-                            <th class="col-stat">L</th>
-                            <th class="col-stat">GD</th>
-                            <th class="col-pts">Pts</th>
-                        </tr>
-                    </thead>
-                    <tbody>${tableRows}</tbody>
-                </table>`;
-            tablesContainer.appendChild(card);
+            tableHTML += '</tbody></table></div>';
+            tablesContainer.innerHTML += tableHTML;
         });
 
-        // 3. RENDER KNOCKOUT STAGE
-        const koContainer = document.getElementById('bracket-container');
-        koContainer.innerHTML = '';
-        
-        const totalKOFixturesCount = Object.values(knockoutStages).reduce((acc, curr) => acc + curr.length, 0);
+        // 3. PROPAGATE KNOCKOUT WINNERS DYNAMICALLY
+        const knockoutStagesDef = [
+            { key: "Round of 32", matches: [] },
+            { key: "Round of 16", matches: [] },
+            { key: "Quarter-finals", matches: [] },
+            { key: "Semi-finals", matches: [] },
+            { key: "Final", matches: [] }
+        ];
 
-        if (totalKOFixturesCount > 0) {
-            const orderedStages = ["Round of 32", "Round of 16", "Quarter-finals", "Semi-finals", "Match for third place", "Final"];
+        // Gather base knockout entries
+        allMatches.forEach(match => {
+            if (!match.group && match.stageName) {
+                let standardStageKey = null;
+                const nameLower = match.stageName.toLowerCase();
+                if (nameLower.includes("32")) standardStageKey = "Round of 32";
+                else if (nameLower.includes("16")) standardStageKey = "Round of 16";
+                else if (nameLower.includes("quarter")) standardStageKey = "Quarter-finals";
+                else if (nameLower.includes("semi")) standardStageKey = "Semi-finals";
+                else if (nameLower.includes("final")) standardStageKey = "Final";
+                
+                if (standardStageKey) {
+                    const targetStage = knockoutStagesDef.find(s => s.key === standardStageKey);
+                    // Prevent duplicates by index tracking
+                    if (!targetStage.matches.find(m => m.num === match.num)) {
+                        targetStage.matches.push(match);
+                    }
+                }
+            }
+        });
+
+        // Sort internal stage listings explicitly by tracking index
+        knockoutStagesDef.forEach(s => s.matches.sort((a,b) => (a.num || 0) - (b.num || 0)));
+
+        // Live Mapping Pipeline: Intercept placeholders like "W65" and fill with actual team names
+        const matchWinnerMap = {};
+        
+        // Pass through rounds sequentially to bubble winners up
+        knockoutStagesDef.forEach(stage => {
+            stage.matches.forEach(match => {
+                // Resolve placeholders for team1
+                if (match.team1 && match.team1.startsWith('W')) {
+                    const sourceMatchNum = parseInt(match.team1.substring(1), 10);
+                    if (matchWinnerMap[sourceMatchNum]) {
+                        match.team1 = matchWinnerMap[sourceMatchNum];
+                    }
+                }
+                // Resolve placeholders for team2
+                if (match.team2 && match.team2.startsWith('W')) {
+                    const sourceMatchNum = parseInt(match.team2.substring(1), 10);
+                    if (matchWinnerMap[sourceMatchNum]) {
+                        match.team2 = matchWinnerMap[sourceMatchNum];
+                    }
+                }
+                
+                // Cache winner if this match is completed
+                const winner = getMatchWinner(match);
+                if (winner && match.num) {
+                    matchWinnerMap[match.num] = winner;
+                }
+            });
+        });
+
+        // Calculate auto-fold settings for structural columns
+        const totalKnockoutMatchesCount = knockoutStagesDef.reduce((acc, s) => acc + s.matches.length, 0);
+        
+        if (totalKnockoutMatchesCount > 0) {
+            const koContainer = document.getElementById('bracket-container');
+            koContainer.innerHTML = '';
             
-            orderedStages.forEach(stageName => {
-                const stageMatches = knockoutStages[stageName] || [];
+            // Generate customized styles for collapsed columns dynamically
+            let adaptiveStyles = document.getElementById('adaptive-bracket-styles');
+            if (!adaptiveStyles) {
+                adaptiveStyles = document.createElement('style');
+                adaptiveStyles.id = 'adaptive-bracket-styles';
+                document.head.appendChild(adaptiveStyles);
+            }
+            
+            let gridStyles = "";
+            knockoutStagesDef.forEach((stage, idx) => {
+                const stateKey = stage.key;
+                const total = stage.matches.length;
+                const completed = stage.matches.filter(m => parseScores(m).hasScore).length;
+                const hasData = stage.matches.some(m => m.team1 && !m.team1.startsWith('W') || m.team2 && !m.team2.startsWith('W'));
+                
+                let isFolded = false;
+                if (completed === total && total > 0) isFolded = true; // Completed
+                if (!hasData && total > 0 && idx > 0) isFolded = true; // No data yet
+                
+                // Allow manual click override adjustments to invert state
+                if (bracketCollapseState[stateKey] !== undefined) {
+                    isFolded = bracketCollapseState[stateKey];
+                } else {
+                    bracketCollapseState[stateKey] = isFolded;
+                }
+                
+                gridStyles += isFolded ? "minmax(45px, 55px) " : "minmax(240px, 1fr) ";
+            });
+            adaptiveStyles.innerHTML = `.bracket-grid { grid-template-columns: ${gridStyles}; transition: all 0.3s ease; }`;
+
+            // 4. GENERATE BRACKET PRESENTATION ELEMENT NODES
+            knockoutStagesDef.forEach(stage => {
                 const column = document.createElement('div');
                 column.className = 'bracket-column';
                 
-                column.innerHTML = `<div class="bracket-column-title">${stageName}</div>`;
+                const isFolded = bracketCollapseState[stage.key];
+                const completed = stage.matches.filter(m => parseScores(m).hasScore).length;
                 
-                const matchContainer = document.createElement('div');
-                matchContainer.className = 'bracket-match-container';
+                let statusLabel = "";
+                if (completed === stage.matches.length && stage.matches.length > 0) statusLabel = " 🟢 Finished";
+                else if (stage.matches.some(m => parseScores(m).hasScore)) statusLabel = " ⚡ Active";
 
-                if (stageMatches.length === 0) {
-                    matchContainer.innerHTML = `<div class="placeholder-text">Awaiting results</div>`;
+                if (isFolded) {
+                    // Render slim vertical tab item for folded states
+                    column.innerHTML = `
+                        <div class="bracket-column-title" onclick="toggleBracketColumn('${stage.key}')" style="cursor:pointer; writing-mode: vertical-lr; text-orientation: mixed; padding: 15px 8px; height: 100%; margin: 0; border-radius: 4px; background: #4a5568;" title="Click to unfold ${stage.key}">
+                            ↔️ ${stage.key}${statusLabel}
+                        </div>
+                    `;
                 } else {
-                    stageMatches.forEach(match => {
-                        const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
-                        const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
-                        
-                        const scoreInfo = parseScores(match);
-                        const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
-                        const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
+                    // Render open bracket layout column standard display
+                    column.innerHTML = `
+                        <div class="bracket-column-title" onclick="toggleBracketColumn('${stage.key}')" style="cursor:pointer; display: flex; justify-content: space-between; align-items: center;" title="Click to fold column">
+                            <span>🏆 ${stage.key}</span> <span style="font-size:0.8em; opacity:0.8;">↔️</span>
+                        </div>
+                    `;
+                    
+                    const matchContainer = document.createElement('div');
+                    matchContainer.className = 'bracket-match-container';
+                    
+                    if (stage.matches.length === 0) {
+                        matchContainer.innerHTML = `<div class="placeholder-text">Pending assignments</div>`;
+                    } else {
+                        stage.matches.forEach(match => {
+                            const p1 = (match.team1 && sweepstakeData[match.team1]) ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
+                            const p2 = (match.team2 && sweepstakeData[match.team2]) ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
+                            
+                            const scoreInfo = parseScores(match);
+                            const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
+                            const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
+                            
+                            const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2 || (match.score.ps && match.score.ps[0] > match.score.ps[1]));
+                            const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1 || (match.score.ps && match.score.ps[1] > match.score.ps[0]));
+                            
+                            // Check if scores are locked in extra time or penalties to add label badges
+                            let extraLabel = "";
+                            if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
+                            else if (match.score && match.score.et) extraLabel = " <small style='color:#4a5568;'>(AET)</small>";
 
-                        const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
-                        const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
-
-                        matchContainer.innerHTML += `
-                            <div class="bracket-match-card">
-                                <div class="bracket-team-line ${t1Won ? 'winner-highlight' : ''}">
-                                    <div class="bracket-team-details">
-                                        <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}</span>
-                                        ${p1}
+                            matchContainer.innerHTML += `
+                                <div class="bracket-match-card">
+                                    <div style="font-size:0.7em; color:#718096; padding: 2px 4px; display:flex; justify-content:space-between;">
+                                        <span>M${match.num || ''}</span>
+                                        <span>${formatUKDate(match.date)}</span>
                                     </div>
-                                    <span class="bracket-match-score">${s1}</span>
-                                </div>
-                                <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
-                                    <div class="bracket-team-details">
-                                        <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}</span>
-                                        ${p2}
+                                    <div class="bracket-team-line ${t1Won ? 'winner-highlight' : ''}">
+                                        <div class="bracket-team-details">
+                                            <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}</span>
+                                            ${p1}
+                                        </div>
+                                        <span class="bracket-match-score">${s1}</span>
                                     </div>
-                                    <span class="bracket-match-score">${s2}</span>
+                                    <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
+                                        <div class="bracket-team-details">
+                                            <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}</span>
+                                            ${p2}
+                                        </div>
+                                        <span class="bracket-match-score">${s2}${extraLabel}</span>
+                                    </div>
                                 </div>
-                            </div>
-                        `;
-                    });
+                            `;
+                        });
+                    }
+                    column.appendChild(matchContainer);
                 }
-                column.appendChild(matchContainer);
                 koContainer.appendChild(column);
             });
         } else {
