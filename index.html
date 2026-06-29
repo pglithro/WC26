@@ -361,7 +361,6 @@ const yesterdayObj = new Date();
 yesterdayObj.setDate(todayObj.getDate() - 1);
 const yesterdayString = yesterdayObj.toISOString().split('T')[0];
 
-// Store tracking states for column manual expansion override toggles
 const bracketCollapseState = {};
 
 function switchTab(tabId) {
@@ -497,7 +496,6 @@ function getMatchWinner(match) {
     if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
     if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
     
-    // Penalties check if scores are level
     if (match.score && match.score.ps && Array.isArray(match.score.ps)) {
         if (match.score.ps[0] > match.score.ps[1]) return match.team1;
         if (match.score.ps[1] > match.score.ps[0]) return match.team2;
@@ -505,10 +503,8 @@ function getMatchWinner(match) {
     return null;
 }
 
-// Global toggle for collapsing or manual overrides
 function toggleBracketColumn(stageKey) {
     bracketCollapseState[stageKey] = !bracketCollapseState[stageKey];
-    // Re-trigger layout mapping
     window.lastFetchedData ? renderData(window.lastFetchedData) : location.reload();
 }
 
@@ -535,17 +531,16 @@ function renderData(data) {
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
             
-            let r32Winners = [];
+            // Generate some completed matches, some live, and some empty slots to test your features
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: { ft: [2, 1] }, stageName: "Round of 32" });
-                r32Winners.push(t1);
+                // Let's leave a couple of matches unplayed to showcase the "Or" conditional fallback feature
+                let scoreObj = (i < 14) ? { ft: [2, 1] } : null;
+                simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: scoreObj, stageName: "Round of 32" });
             }
-            let r16Winners = [];
             for(let i = 0; i < 8; i++) {
-                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", score: { ft: [0, 2] }, stageName: "Round of 16" });
-                r16Winners.push(`W${66 + (i*2)}`); 
+                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
             }
             for(let i = 0; i < 4; i++) {
                 simulatedKO.push({ num: 89 + i, team1: `W${81 + (i*2)}`, team2: `W${82 + (i*2)}`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
@@ -581,7 +576,7 @@ function renderData(data) {
                 html += `
                     <div class="fixture-card">
                         <div class="fixture-meta">
-                            <span>${match.group || match.stageName || 'Knockout Stage'}</span>
+                            <span>${match.group || match.stageName || 'Knockout Match'}</span>
                             <span>${convertLocalBST(match.date, match.time)}</span>
                         </div>
                         <div class="fixture-row ${t1Won ? 'winner-highlight' : ''}">
@@ -604,16 +599,11 @@ function renderData(data) {
 
         // 2. RENDER GROUP TABLES
         const standings = {};
-        let totalGroupMatches = 0;
-        let completedGroupMatches = 0;
-        
         allMatches.forEach(match => {
             const scoreInfo = parseScores(match);
             const team1 = match.team1;
             const team2 = match.team2;
             if (match.group) {
-                totalGroupMatches++;
-                if (scoreInfo.hasScore) completedGroupMatches++;
                 const groupName = match.group;
                 [team1, team2].forEach(team => {
                     if (!team || team === "TBD") return;
@@ -692,7 +682,7 @@ function renderData(data) {
             tablesContainer.innerHTML += tableHTML;
         });
 
-        // 3. PROPAGATE KNOCKOUT WINNERS DYNAMICALLY
+        // 3. SEPARATE AND TRACK KNOCKOUT ROUNDS
         const knockoutStagesDef = [
             { key: "Round of 32", matches: [] },
             { key: "Round of 16", matches: [] },
@@ -701,7 +691,6 @@ function renderData(data) {
             { key: "Final", matches: [] }
         ];
 
-        // Gather base knockout entries
         allMatches.forEach(match => {
             if (!match.group && match.stageName) {
                 let standardStageKey = null;
@@ -714,39 +703,59 @@ function renderData(data) {
                 
                 if (standardStageKey) {
                     const targetStage = knockoutStagesDef.find(s => s.key === standardStageKey);
-                    // Prevent duplicates by index tracking
                     if (!targetStage.matches.find(m => m.num === match.num)) {
-                        targetStage.matches.push(match);
+                        // Deep clone match reference object structure to avoid mutation caching artifacts
+                        targetStage.matches.push(JSON.parse(JSON.stringify(match)));
                     }
                 }
             }
         });
 
-        // Sort internal stage listings explicitly by tracking index
         knockoutStagesDef.forEach(s => s.matches.sort((a,b) => (a.num || 0) - (b.num || 0)));
 
-        // Live Mapping Pipeline: Intercept placeholders like "W65" and fill with actual team names
+        // 4. MAP DYNAMIC WINNERS AND DUAL POSSIBILITIES
         const matchWinnerMap = {};
+        const baseMatchLookup = {};
         
-        // Pass through rounds sequentially to bubble winners up
+        // Cache initial raw references for all match items sequentially
+        knockoutStagesDef.forEach(stage => {
+            stage.matches.forEach(m => {
+                if (m.num) baseMatchLookup[m.num] = m;
+            });
+        });
+
+        // Helper function to figure out teams recursively
+        function resolveTeamDisplay(teamStr) {
+            if (!teamStr) return { html: 'TBD', isPossibility: false, isReal: false };
+            if (!teamStr.startsWith('W')) return { html: teamStr, isPossibility: false, isReal: true };
+            
+            const sourceMatchNum = parseInt(teamStr.substring(1), 10);
+            if (matchWinnerMap[sourceMatchNum]) {
+                return { html: matchWinnerMap[sourceMatchNum], isPossibility: false, isReal: true };
+            }
+            
+            // If match hasn't finished, check if both parent teams are already known
+            const parentMatch = baseMatchLookup[sourceMatchNum];
+            if (parentMatch && parentMatch.team1 && parentMatch.team2) {
+                const t1Resolved = resolveTeamDisplay(parentMatch.team1);
+                const t2Resolved = resolveTeamDisplay(parentMatch.team2);
+                
+                if (t1Resolved.isReal && t2Resolved.isReal) {
+                    return { 
+                        html: `<span style="color:#a0aec0; font-style:italic;">${t1Resolved.html} or ${t2Resolved.html}</span>`, 
+                        isPossibility: true, 
+                        isReal: false 
+                    };
+                }
+            }
+            
+            return { html: 'TBD', isPossibility: false, isReal: false };
+        }
+
+        // Sequential resolution loop pipeline pass-through
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(match => {
-                // Resolve placeholders for team1
-                if (match.team1 && match.team1.startsWith('W')) {
-                    const sourceMatchNum = parseInt(match.team1.substring(1), 10);
-                    if (matchWinnerMap[sourceMatchNum]) {
-                        match.team1 = matchWinnerMap[sourceMatchNum];
-                    }
-                }
-                // Resolve placeholders for team2
-                if (match.team2 && match.team2.startsWith('W')) {
-                    const sourceMatchNum = parseInt(match.team2.substring(1), 10);
-                    if (matchWinnerMap[sourceMatchNum]) {
-                        match.team2 = matchWinnerMap[sourceMatchNum];
-                    }
-                }
-                
-                // Cache winner if this match is completed
+                // Update final tracking winner map caches if resolved
                 const winner = getMatchWinner(match);
                 if (winner && match.num) {
                     matchWinnerMap[match.num] = winner;
@@ -754,14 +763,13 @@ function renderData(data) {
             });
         });
 
-        // Calculate auto-fold settings for structural columns
+        // 5. DETERMINE COLUMN AUTOFOLD AND RENDER GRID
         const totalKnockoutMatchesCount = knockoutStagesDef.reduce((acc, s) => acc + s.matches.length, 0);
         
         if (totalKnockoutMatchesCount > 0) {
             const koContainer = document.getElementById('bracket-container');
             koContainer.innerHTML = '';
             
-            // Generate customized styles for collapsed columns dynamically
             let adaptiveStyles = document.getElementById('adaptive-bracket-styles');
             if (!adaptiveStyles) {
                 adaptiveStyles = document.createElement('style');
@@ -774,13 +782,18 @@ function renderData(data) {
                 const stateKey = stage.key;
                 const total = stage.matches.length;
                 const completed = stage.matches.filter(m => parseScores(m).hasScore).length;
-                const hasData = stage.matches.some(m => m.team1 && !m.team1.startsWith('W') || m.team2 && !m.team2.startsWith('W'));
+                
+                // Determine if any match in this round contains known active teams or predicted sub-possibilities
+                const hasData = stage.matches.some(m => {
+                    const r1 = resolveTeamDisplay(m.team1);
+                    const r2 = resolveTeamDisplay(m.team2);
+                    return r1.isReal || r1.isPossibility || r2.isReal || r2.isPossibility;
+                });
                 
                 let isFolded = false;
-                if (completed === total && total > 0) isFolded = true; // Completed
-                if (!hasData && total > 0 && idx > 0) isFolded = true; // No data yet
+                if (completed === total && total > 0) isFolded = true; // Fold completed rounds
+                if (!hasData && total > 0 && idx > 0) isFolded = true;  // Fold rounds with no known teams yet
                 
-                // Allow manual click override adjustments to invert state
                 if (bracketCollapseState[stateKey] !== undefined) {
                     isFolded = bracketCollapseState[stateKey];
                 } else {
@@ -791,7 +804,6 @@ function renderData(data) {
             });
             adaptiveStyles.innerHTML = `.bracket-grid { grid-template-columns: ${gridStyles}; transition: all 0.3s ease; }`;
 
-            // 4. GENERATE BRACKET PRESENTATION ELEMENT NODES
             knockoutStagesDef.forEach(stage => {
                 const column = document.createElement('div');
                 column.className = 'bracket-column';
@@ -800,18 +812,16 @@ function renderData(data) {
                 const completed = stage.matches.filter(m => parseScores(m).hasScore).length;
                 
                 let statusLabel = "";
-                if (completed === stage.matches.length && stage.matches.length > 0) statusLabel = " 🟢 Finished";
-                else if (stage.matches.some(m => parseScores(m).hasScore)) statusLabel = " ⚡ Active";
+                if (completed === stage.matches.length && stage.matches.length > 0) statusLabel = " 🟢 Done";
+                else if (stage.matches.some(m => parseScores(m).hasScore)) statusLabel = " ⚡ Live";
 
                 if (isFolded) {
-                    // Render slim vertical tab item for folded states
                     column.innerHTML = `
-                        <div class="bracket-column-title" onclick="toggleBracketColumn('${stage.key}')" style="cursor:pointer; writing-mode: vertical-lr; text-orientation: mixed; padding: 15px 8px; height: 100%; margin: 0; border-radius: 4px; background: #4a5568;" title="Click to unfold ${stage.key}">
+                        <div class="bracket-column-title" onclick="toggleBracketColumn('${stage.key}')" style="cursor:pointer; writing-mode: vertical-lr; text-orientation: mixed; padding: 15px 8px; height: 100%; margin: 0; border-radius: 4px; background: #4a5568;" title="Click to expand ${stage.key}">
                             ↔️ ${stage.key}${statusLabel}
                         </div>
                     `;
                 } else {
-                    // Render open bracket layout column standard display
                     column.innerHTML = `
                         <div class="bracket-column-title" onclick="toggleBracketColumn('${stage.key}')" style="cursor:pointer; display: flex; justify-content: space-between; align-items: center;" title="Click to fold column">
                             <span>🏆 ${stage.key}</span> <span style="font-size:0.8em; opacity:0.8;">↔️</span>
@@ -825,8 +835,12 @@ function renderData(data) {
                         matchContainer.innerHTML = `<div class="placeholder-text">Pending assignments</div>`;
                     } else {
                         stage.matches.forEach(match => {
-                            const p1 = (match.team1 && sweepstakeData[match.team1]) ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
-                            const p2 = (match.team2 && sweepstakeData[match.team2]) ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
+                            const res1 = resolveTeamDisplay(match.team1);
+                            const res2 = resolveTeamDisplay(match.team2);
+                            
+                            // Only apply sweepstake badges if it's a settled, confirmed team name
+                            const p1 = (res1.isReal && sweepstakeData[res1.html]) ? `<span class="player-tag">${sweepstakeData[res1.html]}</span>` : '';
+                            const p2 = (res2.isReal && sweepstakeData[res2.html]) ? `<span class="player-tag">${sweepstakeData[res2.html]}</span>` : '';
                             
                             const scoreInfo = parseScores(match);
                             const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
@@ -835,7 +849,6 @@ function renderData(data) {
                             const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2 || (match.score.ps && match.score.ps[0] > match.score.ps[1]));
                             const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1 || (match.score.ps && match.score.ps[1] > match.score.ps[0]));
                             
-                            // Check if scores are locked in extra time or penalties to add label badges
                             let extraLabel = "";
                             if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
                             else if (match.score && match.score.et) extraLabel = " <small style='color:#4a5568;'>(AET)</small>";
@@ -848,14 +861,14 @@ function renderData(data) {
                                     </div>
                                     <div class="bracket-team-line ${t1Won ? 'winner-highlight' : ''}">
                                         <div class="bracket-team-details">
-                                            <span class="bracket-team-name" title="${match.team1 || 'TBD'}">${match.team1 || 'TBD'}</span>
+                                            <span class="bracket-team-name">${res1.html}</span>
                                             ${p1}
                                         </div>
                                         <span class="bracket-match-score">${s1}</span>
                                     </div>
                                     <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
                                         <div class="bracket-team-details">
-                                            <span class="bracket-team-name" title="${match.team2 || 'TBD'}">${match.team2 || 'TBD'}</span>
+                                            <span class="bracket-team-name">${res2.html}</span>
                                             ${p2}
                                         </div>
                                         <span class="bracket-match-score">${s2}${extraLabel}</span>
