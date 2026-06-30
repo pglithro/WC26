@@ -718,45 +718,46 @@ function renderData(data) {
 
         knockoutStagesDef.forEach(s => s.matches.sort((a,b) => (a.num || 0) - (b.num || 0)));
 
-        // 4. MAP DYNAMIC WINNERS AND DUAL POSSIBILITIES
+ // 4. MAP DYNAMIC WINNERS AND DUAL POSSIBILITIES
         const matchWinnerMap = {};
         const baseMatchLookup = {};
         
+        // Cache initial raw references for all match items sequentially
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(m => {
                 if (m.num) baseMatchLookup[m.num] = m;
             });
         });
 
+        // Progressive pass loop to ensure winners propagate across multiple tiers
+        // (Runs up to 5 times to comfortably cover Round of 32 down to Finals)
+        for (let pass = 0; pass < 5; pass++) {
+            knockoutStagesDef.forEach(stage => {
+                stage.matches.forEach(match => {
+                    if (match.num && !matchWinnerMap[match.num]) {
+                        // Dynamically update match teams if their parent matches have concluded
+                        if (match.team1 && match.team1.startsWith('W')) {
+                            const pNum = parseInt(match.team1.substring(1), 10);
+                            if (matchWinnerMap[pNum]) match.team1 = matchWinnerMap[pNum];
+                        }
+                        if (match.team2 && match.team2.startsWith('W')) {
+                            const pNum = parseInt(match.team2.substring(1), 10);
+                            if (matchWinnerMap[pNum]) match.team2 = matchWinnerMap[pNum];
+                        }
+
+                        // Now check if this match has a settled winner
+                        const winner = getMatchWinner(match);
+                        if (winner) {
+                            matchWinnerMap[match.num] = winner;
+                        }
+                    }
+                });
+            });
+        }
+
+        // Helper function to figure out unplayed team placeholders recursively
         function resolveTeamDisplay(teamStr) {
             if (!teamStr) return { html: 'TBD', isPossibility: false, isReal: false };
-            
-            // Handle loser designations (e.g. L93 or L94) for the 3rd place match
-            if (teamStr.startsWith('L')) {
-                const sourceMatchNum = parseInt(teamStr.substring(1), 10);
-                const parentMatch = baseMatchLookup[sourceMatchNum];
-                if (parentMatch && parentMatch.team1 && parentMatch.team2) {
-                    const winner = matchWinnerMap[sourceMatchNum];
-                    if (winner) {
-                        const t1Res = resolveTeamDisplay(parentMatch.team1).html;
-                        const t2Res = resolveTeamDisplay(parentMatch.team2).html;
-                        const loserName = (winner === t1Res) ? t2Res : t1Res;
-                        return { html: loserName, isPossibility: false, isReal: true };
-                    }
-                    
-                    const t1Resolved = resolveTeamDisplay(parentMatch.team1);
-                    const t2Resolved = resolveTeamDisplay(parentMatch.team2);
-                    if (t1Resolved.isReal && t2Resolved.isReal) {
-                        return { 
-                            html: `<span style="color:#a0aec0; font-style:italic;">Loser M${sourceMatchNum}</span>`, 
-                            isPossibility: true, 
-                            isReal: false 
-                        };
-                    }
-                }
-                return { html: `Loser M${sourceMatchNum}`, isPossibility: false, isReal: false };
-            }
-
             if (!teamStr.startsWith('W')) return { html: teamStr, isPossibility: false, isReal: true };
             
             const sourceMatchNum = parseInt(teamStr.substring(1), 10);
@@ -764,6 +765,7 @@ function renderData(data) {
                 return { html: matchWinnerMap[sourceMatchNum], isPossibility: false, isReal: true };
             }
             
+            // If match hasn't finished, check if both parent teams are already known
             const parentMatch = baseMatchLookup[sourceMatchNum];
             if (parentMatch && parentMatch.team1 && parentMatch.team2) {
                 const t1Resolved = resolveTeamDisplay(parentMatch.team1);
@@ -779,25 +781,6 @@ function renderData(data) {
             }
             
             return { html: 'TBD', isPossibility: false, isReal: false };
-        }
-
-        // Loop multiple times to allow cascading placeholder updates across tournament rounds
-        for (let pass = 0; pass < 5; pass++) {
-            knockoutStagesDef.forEach(stage => {
-                stage.matches.forEach(match => {
-                    if (match.num && !matchWinnerMap[match.num]) {
-                        // Temporarily map teams if they can be fetched from previous parents
-                        const tempTeam1 = resolveTeamDisplay(match.team1).html;
-                        const tempTeam2 = resolveTeamDisplay(match.team2).html;
-                        
-                        let clonedMatch = { ...match, team1: tempTeam1, team2: tempTeam2 };
-                        const winner = getMatchWinner(clonedMatch);
-                        if (winner) {
-                            matchWinnerMap[match.num] = winner;
-                        }
-                    }
-                });
-            });
         }
 
         // 5. DETERMINE COLUMN AUTOFOLD AND RENDER GRID
