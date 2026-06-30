@@ -490,7 +490,6 @@ function extractAllMatches(obj, currentRoundName = '') {
 
 function parseScores(match) {
     if (match.score) {
-        // Evaluate extra time score if available, otherwise fall back to full time
         let targetScore = match.score.et || match.score.ft;
         if (targetScore && Array.isArray(targetScore)) {
             return {
@@ -511,7 +510,6 @@ function getMatchWinner(match) {
     const scoreInfo = parseScores(match);
     if (!scoreInfo.hasScore) return null;
     
-    // Check key 'p' for penalty shootout results first
     if (scoreInfo.hasPenalties) {
         if (scoreInfo.pen1 > scoreInfo.pen2) return match.team1;
         if (scoreInfo.pen2 > scoreInfo.pen1) return match.team2;
@@ -550,7 +548,6 @@ function renderData(data) {
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
             
-            // Inject structural simulation including a sample penalty shootout
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
@@ -772,7 +769,6 @@ function renderData(data) {
             return { html: 'TBD', isPossibility: false, isReal: false };
         }
 
-        // Sequential resolution loop pipeline pass-through
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(match => {
                 const winner = getMatchWinner(match);
@@ -867,13 +863,8 @@ function renderData(data) {
                             const penaltyDisplay2 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen2})</span>` : '';
                             
                             const winner = getMatchWinner(match);
-                            // Verify matches against the template placeholders or cleanly resolved names
                             const t1Won = winner && (winner === match.team1 || winner === res1.html);
                             const t2Won = winner && (winner === match.team2 || winner === res2.html);
-                            
-                            let extraLabel = "";
-                            if (match.score && match.score.p) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
-                            else if (match.score && match.score.et) extraLabel = " <small style='color:#4a5568;'>(AET)</small>";
 
                             matchContainer.innerHTML += `
                                 <div class="bracket-match-card">
@@ -893,7 +884,7 @@ function renderData(data) {
                                             <span class="bracket-team-name">${res2.html}</span>
                                             ${p2}
                                         </div>
-                                        <span class="bracket-match-score">${s2}${penaltyDisplay2}${extraLabel}</span>
+                                        <span class="bracket-match-score">${s2}${penaltyDisplay2}</span>
                                     </div>
                                 </div>
                             `;
