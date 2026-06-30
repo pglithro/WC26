@@ -263,6 +263,15 @@
             min-width: 14px;
             text-align: center;
             flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .penalty-score {
+            color: #e53e3e;
+            font-size: 0.85em;
+            margin-left: 3px;
+        }
+        .winner-highlight .penalty-score {
+            color: #fffffff0 !important;
         }
         
         #loading {
@@ -479,27 +488,36 @@ function extractAllMatches(obj, currentRoundName = '') {
 }
 
 function parseScores(match) {
-    if (match.score && match.score.ft && Array.isArray(match.score.ft)) {
-        return {
-            hasScore: true,
-            score1: match.score.ft[0],
-            score2: match.score.ft[1],
-            rawSource: match.score
-        };
+    if (match.score) {
+        // Fall back to regular full time score if extra time isn't present
+        let baseScore = match.score.et || match.score.ft;
+        if (baseScore && Array.isArray(baseScore)) {
+            return {
+                hasScore: true,
+                score1: baseScore[0],
+                score2: baseScore[1],
+                hasPenalties: !!(match.score.ps && Array.isArray(match.score.ps)),
+                pen1: match.score.ps ? match.score.ps[0] : null,
+                pen2: match.score.ps ? match.score.ps[1] : null,
+                rawSource: match.score
+            };
+        }
     }
-    return { hasScore: false, score1: null, score2: null, rawSource: match.score || null };
+    return { hasScore: false, score1: null, score2: null, hasPenalties: false, pen1: null, pen2: null, rawSource: null };
 }
 
 function getMatchWinner(match) {
     const scoreInfo = parseScores(match);
     if (!scoreInfo.hasScore) return null;
+    
+    if (scoreInfo.hasPenalties) {
+        if (scoreInfo.pen1 > scoreInfo.pen2) return match.team1;
+        if (scoreInfo.pen2 > scoreInfo.pen1) return match.team2;
+    }
+    
     if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
     if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
     
-    if (match.score && match.score.ps && Array.isArray(match.score.ps)) {
-        if (match.score.ps[0] > match.score.ps[1]) return match.team1;
-        if (match.score.ps[1] > match.score.ps[0]) return match.team2;
-    }
     return null;
 }
 
@@ -531,12 +549,11 @@ function renderData(data) {
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
             
-            // Generate some completed matches, some live, and some empty slots to test your features
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                // Let's leave a couple of matches unplayed to showcase the "Or" conditional fallback feature
-                let scoreObj = (i < 14) ? { ft: [2, 1] } : null;
+                // Set match index 0 to simulate a penalty shootout scenario (1-1 full time, 4-3 penalties)
+                let scoreObj = (i === 0) ? { ft: [1, 1], ps: [4, 3] } : ((i < 14) ? { ft: [2, 1] } : null);
                 simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: scoreObj, stageName: "Round of 32" });
             }
             for(let i = 0; i < 8; i++) {
@@ -568,10 +585,13 @@ function renderData(data) {
                 const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
                 const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
                 const scoreInfo = parseScores(match);
-                const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
-                const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
-                const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
-                const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
+                
+                const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen1})</span>` : '')) : '-';
+                const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen2})</span>` : '')) : '-';
+                
+                const winner = getMatchWinner(match);
+                const t1Won = winner && winner === match.team1;
+                const t2Won = winner && winner === match.team2;
                 
                 html += `
                     <div class="fixture-card">
@@ -704,7 +724,6 @@ function renderData(data) {
                 if (standardStageKey) {
                     const targetStage = knockoutStagesDef.find(s => s.key === standardStageKey);
                     if (!targetStage.matches.find(m => m.num === match.num)) {
-                        // Deep clone match reference object structure to avoid mutation caching artifacts
                         targetStage.matches.push(JSON.parse(JSON.stringify(match)));
                     }
                 }
@@ -717,10 +736,19 @@ function renderData(data) {
         const matchWinnerMap = {};
         const baseMatchLookup = {};
         
-        // Cache initial raw references for all match items sequentially
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(m => {
                 if (m.num) baseMatchLookup[m.num] = m;
+            });
+        });
+
+        // Sequential resolution loop pipeline pass-through
+        knockoutStagesDef.forEach(stage => {
+            stage.matches.forEach(match => {
+                const winner = getMatchWinner(match);
+                if (winner && match.num) {
+                    matchWinnerMap[match.num] = winner;
+                }
             });
         });
 
@@ -734,7 +762,6 @@ function renderData(data) {
                 return { html: matchWinnerMap[sourceMatchNum], isPossibility: false, isReal: true };
             }
             
-            // If match hasn't finished, check if both parent teams are already known
             const parentMatch = baseMatchLookup[sourceMatchNum];
             if (parentMatch && parentMatch.team1 && parentMatch.team2) {
                 const t1Resolved = resolveTeamDisplay(parentMatch.team1);
@@ -751,17 +778,6 @@ function renderData(data) {
             
             return { html: 'TBD', isPossibility: false, isReal: false };
         }
-
-        // Sequential resolution loop pipeline pass-through
-        knockoutStagesDef.forEach(stage => {
-            stage.matches.forEach(match => {
-                // Update final tracking winner map caches if resolved
-                const winner = getMatchWinner(match);
-                if (winner && match.num) {
-                    matchWinnerMap[match.num] = winner;
-                }
-            });
-        });
 
         // 5. DETERMINE COLUMN AUTOFOLD AND RENDER GRID
         const totalKnockoutMatchesCount = knockoutStagesDef.reduce((acc, s) => acc + s.matches.length, 0);
@@ -783,7 +799,6 @@ function renderData(data) {
                 const total = stage.matches.length;
                 const completed = stage.matches.filter(m => parseScores(m).hasScore).length;
                 
-                // Determine if any match in this round contains known active teams or predicted sub-possibilities
                 const hasData = stage.matches.some(m => {
                     const r1 = resolveTeamDisplay(m.team1);
                     const r2 = resolveTeamDisplay(m.team2);
@@ -791,8 +806,8 @@ function renderData(data) {
                 });
                 
                 let isFolded = false;
-                if (completed === total && total > 0) isFolded = true; // Fold completed rounds
-                if (!hasData && total > 0 && idx > 0) isFolded = true;  // Fold rounds with no known teams yet
+                if (completed === total && total > 0) isFolded = true; 
+                if (!hasData && total > 0 && idx > 0) isFolded = true;  
                 
                 if (bracketCollapseState[stateKey] !== undefined) {
                     isFolded = bracketCollapseState[stateKey];
@@ -838,16 +853,16 @@ function renderData(data) {
                             const res1 = resolveTeamDisplay(match.team1);
                             const res2 = resolveTeamDisplay(match.team2);
                             
-                            // Only apply sweepstake badges if it's a settled, confirmed team name
                             const p1 = (res1.isReal && sweepstakeData[res1.html]) ? `<span class="player-tag">${sweepstakeData[res1.html]}</span>` : '';
                             const p2 = (res2.isReal && sweepstakeData[res2.html]) ? `<span class="player-tag">${sweepstakeData[res2.html]}</span>` : '';
                             
                             const scoreInfo = parseScores(match);
-                            const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
-                            const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
+                            const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen1})</span>` : '')) : '-';
+                            const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen2})</span>` : '')) : '-';
                             
-                            const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2 || (match.score.ps && match.score.ps[0] > match.score.ps[1]));
-                            const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1 || (match.score.ps && match.score.ps[1] > match.score.ps[0]));
+                            const winner = getMatchWinner(match);
+                            const t1Won = winner && winner === match.team1;
+                            const t2Won = winner && winner === match.team2;
                             
                             let extraLabel = "";
                             if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
