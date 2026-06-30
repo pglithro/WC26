@@ -263,17 +263,15 @@
             min-width: 14px;
             text-align: center;
             flex-shrink: 0;
-            white-space: nowrap;
         }
-        .penalty-text {
+        .penalty-tag {
             color: #e53e3e;
+            font-size: 0.85em;
             font-weight: normal;
-            font-size: 0.9em;
-            margin-left: 2px;
+            margin-left: 3px;
         }
-        .winner-highlight .penalty-text {
-            color: #fff !important;
-            opacity: 0.9;
+        .winner-highlight .penalty-tag {
+            color: #fff;
         }
         
         #loading {
@@ -491,12 +489,13 @@ function extractAllMatches(obj, currentRoundName = '') {
 
 function parseScores(match) {
     if (match.score) {
-        let baseScore = match.score.et || match.score.ft;
-        if (baseScore && Array.isArray(baseScore)) {
+        // Evaluate extra time score if available, otherwise full time score
+        let targetScore = match.score.et || match.score.ft;
+        if (targetScore && Array.isArray(targetScore)) {
             return {
                 hasScore: true,
-                score1: baseScore[0],
-                score2: baseScore[1],
+                score1: targetScore[0],
+                score2: targetScore[1],
                 hasPenalties: !!(match.score.ps && Array.isArray(match.score.ps)),
                 pen1: match.score.ps ? match.score.ps[0] : null,
                 pen2: match.score.ps ? match.score.ps[1] : null,
@@ -504,24 +503,21 @@ function parseScores(match) {
             };
         }
     }
-    return { hasScore: false, score1: null, score2: null, hasPenalties: false, pen1: null, pen2: null, rawSource: null };
+    return { hasScore: false, score1: null, score2: null, hasPenalties: false, pen1: null, pen2: null, rawSource: match.score || null };
 }
 
-function getMatchWinner(match, resolve1 = null, resolve2 = null) {
+function getMatchWinner(match) {
     const scoreInfo = parseScores(match);
     if (!scoreInfo.hasScore) return null;
     
-    const team1Name = (resolve1 && resolve1.isReal) ? resolve1.html : match.team1;
-    const team2Name = (resolve2 && resolve2.isReal) ? resolve2.html : match.team2;
-    
+    // Check if match was settled on penalties first
     if (scoreInfo.hasPenalties) {
-        if (scoreInfo.pen1 > scoreInfo.pen2) return team1Name;
-        if (scoreInfo.pen2 > scoreInfo.pen1) return team2Name;
+        if (scoreInfo.pen1 > scoreInfo.pen2) return match.team1;
+        if (scoreInfo.pen2 > scoreInfo.pen1) return match.team2;
     }
     
-    if (scoreInfo.score1 > scoreInfo.score2) return team1Name;
-    if (scoreInfo.score2 > scoreInfo.score1) return team2Name;
-    
+    if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
+    if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
     return null;
 }
 
@@ -556,15 +552,16 @@ function renderData(data) {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
+                
                 // Set match index 0 to simulate a penalty shootout scenario (1-1 full time, 5-4 penalties)
-                let scoreObj = (i === 0) ? { ft: [1, 1], ps: [5, 4] } : ((i < 14) ? { ft: [2, 1] } : null);
+                let scoreObj = (i === 0) ? { ft: [1, 1], et: [1, 1], ps: [5, 4] } : ((i < 14) ? { ft: [2, 1] } : null);
                 simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: scoreObj, stageName: "Round of 32" });
             }
             for(let i = 0; i < 8; i++) {
-                simulatedKO.push({ num: 81 + i, team1: `W65`, team2: `W66`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
+                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
             }
             for(let i = 0; i < 4; i++) {
-                simulatedKO.push({ num: 89 + i, team1: `W81`, team2: `W82`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
+                simulatedKO.push({ num: 89 + i, team1: `W${81 + (i*2)}`, team2: `W${82 + (i*2)}`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
             }
             simulatedKO.push({ num: 93, team1: "W89", team2: "W90", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
             simulatedKO.push({ num: 94, team1: "W91", team2: "W92", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
@@ -588,10 +585,13 @@ function renderData(data) {
             list.forEach(match => {
                 const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
                 const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
-                const scoreInfo = parseScores(match);
                 
-                const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen1})</span>` : '')) : '-';
-                const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen2})</span>` : '')) : '-';
+                const scoreInfo = parseScores(match);
+                const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
+                const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
+                
+                const penaltyDisplay1 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen1})</span>` : '';
+                const penaltyDisplay2 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen2})</span>` : '';
                 
                 const winner = getMatchWinner(match);
                 const t1Won = winner && winner === match.team1;
@@ -605,11 +605,11 @@ function renderData(data) {
                         </div>
                         <div class="fixture-row ${t1Won ? 'winner-highlight' : ''}">
                             <div class="fixture-team" title="${match.team1}">${match.team1} ${p1}</div>
-                            <span class="bracket-match-score">${s1}</span>
+                            <span class="bracket-match-score">${s1}${penaltyDisplay1}</span>
                         </div>
                         <div class="fixture-row ${t2Won ? 'winner-highlight' : ''}">
                             <div class="fixture-team" title="${match.team2}">${match.team2} ${p2}</div>
-                            <span class="bracket-match-score">${s2}</span>
+                            <span class="bracket-match-score">${s2}${penaltyDisplay2}</span>
                         </div>
                     </div>
                 `;
@@ -746,7 +746,6 @@ function renderData(data) {
             });
         });
 
-        // Helper function to figure out teams recursively
         function resolveTeamDisplay(teamStr) {
             if (!teamStr) return { html: 'TBD', isPossibility: false, isReal: false };
             if (!teamStr.startsWith('W')) return { html: teamStr, isPossibility: false, isReal: true };
@@ -773,12 +772,10 @@ function renderData(data) {
             return { html: 'TBD', isPossibility: false, isReal: false };
         }
 
-        // Sequential resolution loop pipeline pass-through runs AFTER helper registration loops
+        // Sequential resolution loop pipeline pass-through
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(match => {
-                const res1 = resolveTeamDisplay(match.team1);
-                const res2 = resolveTeamDisplay(match.team2);
-                const winner = getMatchWinner(match, res1, res2);
+                const winner = getMatchWinner(match);
                 if (winner && match.num) {
                     matchWinnerMap[match.num] = winner;
                 }
@@ -863,12 +860,16 @@ function renderData(data) {
                             const p2 = (res2.isReal && sweepstakeData[res2.html]) ? `<span class="player-tag">${sweepstakeData[res2.html]}</span>` : '';
                             
                             const scoreInfo = parseScores(match);
-                            const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen1})</span>` : '')) : '-';
-                            const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen2})</span>` : '')) : '-';
+                            const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
+                            const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
                             
-                            const winner = getMatchWinner(match, res1, res2);
-                            const t1Won = winner && winner === res1.html;
-                            const t2Won = winner && winner === res2.html;
+                            const penaltyDisplay1 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen1})</span>` : '';
+                            const penaltyDisplay2 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen2})</span>` : '';
+                            
+                            const winner = getMatchWinner(match);
+                            // Verify matches against the raw template placeholders or the cleanly resolved real team names
+                            const t1Won = winner && (winner === match.team1 || winner === res1.html);
+                            const t2Won = winner && (winner === match.team2 || winner === res2.html);
                             
                             let extraLabel = "";
                             if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
@@ -885,14 +886,14 @@ function renderData(data) {
                                             <span class="bracket-team-name">${res1.html}</span>
                                             ${p1}
                                         </div>
-                                        <span class="bracket-match-score">${s1}</span>
+                                        <span class="bracket-match-score">${s1}${penaltyDisplay1}</span>
                                     </div>
                                     <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
                                         <div class="bracket-team-details">
                                             <span class="bracket-team-name">${res2.html}</span>
                                             ${p2}
                                         </div>
-                                        <span class="bracket-match-score">${s2}${extraLabel}</span>
+                                        <span class="bracket-match-score">${s2}${penaltyDisplay2}${extraLabel}</span>
                                     </div>
                                 </div>
                             `;
