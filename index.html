@@ -264,15 +264,6 @@
             text-align: center;
             flex-shrink: 0;
         }
-        .penalty-tag {
-            color: #e53e3e;
-            font-size: 0.85em;
-            font-weight: normal;
-            margin-left: 3px;
-        }
-        .winner-highlight .penalty-tag {
-            color: #fff;
-        }
         
         #loading {
             text-align: center;
@@ -297,11 +288,37 @@
             margin-bottom: 15px;
             font-size: 0.9em;
         }
+
+        /* Diagnostic Styling */
+        #diagnostic-panel {
+            background: #1a202c;
+            color: #cbd5e0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-family: monospace;
+            font-size: 0.85em;
+            max-height: 350px;
+            overflow-y: auto;
+            border-left: 5px solid #ecc94b;
+        }
+        .diag-entry { margin-bottom: 4px; border-bottom: 1px solid #2d3748; padding-bottom: 2px;}
+        .diag-time { color: #4fd1c5; margin-right: 8px; }
+        .diag-err { color: #f56565; font-weight: bold; }
+        .diag-ok { color: #48bb78; }
     </style>
 </head>
 <body>
 
 <div class="container">
+    <div id="diagnostic-panel" style="display: none;">
+        <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 8px; border-bottom: 2px solid #4a5568; padding-bottom: 5px;">
+            <span style="color: #ecc94b; font-weight: bold;">🔍 DASHBOARD DEBUG DIAGNOSTIC OVERLAY</span>
+            <button onclick="document.getElementById('diagnostic-panel').style.display='none'" style="background: #e53e3e; color: white; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer;">Hide Overlay</button>
+        </div>
+        <div id="diagnostic-output"></div>
+    </div>
+
     <div id="test-indicator"></div>
     <h1>🏆 World Cup Sweepstake Hub 🏆</h1>
     <div class="subtitle">Live Tracking Dashboard</div>
@@ -362,6 +379,25 @@ const githubSource = 'https://raw.githubusercontent.com/openfootball/worldcup.js
 const urlParams = new URLSearchParams(window.location.search);
 const showDebug = urlParams.get('debug') === 'true';
 const forceTestKO = urlParams.get('testko') === 'true';
+
+// Auto-activate panel if debug parameters are called
+if (showDebug || forceTestKO) {
+    document.getElementById('diagnostic-panel').style.display = 'block';
+}
+
+function writeDiag(module, message, isError = false) {
+    console.log(`[${module}] ${message}`);
+    const out = document.getElementById('diagnostic-output');
+    if (!out) return;
+    const time = new Date().toLocaleTimeString();
+    out.innerHTML += `
+        <div class="diag-entry">
+            <span class="diag-time">[${time}]</span>
+            <span style="color:#ecc94b; font-weight:bold;">[${module}]</span>
+            <span class="${isError ? 'diag-err' : 'diag-ok'}">${message}</span>
+        </div>
+    `;
+}
 
 const todayObj = new Date();
 const todayString = todayObj.toISOString().split('T')[0];
@@ -488,36 +524,27 @@ function extractAllMatches(obj, currentRoundName = '') {
 }
 
 function parseScores(match) {
-    if (match.score) {
-        // Evaluate extra time score if available, otherwise full time score
-        let targetScore = match.score.et || match.score.ft;
-        if (targetScore && Array.isArray(targetScore)) {
-            return {
-                hasScore: true,
-                score1: targetScore[0],
-                score2: targetScore[1],
-                hasPenalties: !!(match.score.ps && Array.isArray(match.score.ps)),
-                pen1: match.score.ps ? match.score.ps[0] : null,
-                pen2: match.score.ps ? match.score.ps[1] : null,
-                rawSource: match.score
-            };
-        }
+    if (match.score && match.score.ft && Array.isArray(match.score.ft)) {
+        return {
+            hasScore: true,
+            score1: match.score.ft[0],
+            score2: match.score.ft[1],
+            rawSource: match.score
+        };
     }
-    return { hasScore: false, score1: null, score2: null, hasPenalties: false, pen1: null, pen2: null, rawSource: match.score || null };
+    return { hasScore: false, score1: null, score2: null, rawSource: match.score || null };
 }
 
 function getMatchWinner(match) {
     const scoreInfo = parseScores(match);
     if (!scoreInfo.hasScore) return null;
-    
-    // Check if match was settled on penalties first
-    if (scoreInfo.hasPenalties) {
-        if (scoreInfo.pen1 > scoreInfo.pen2) return match.team1;
-        if (scoreInfo.pen2 > scoreInfo.pen1) return match.team2;
-    }
-    
     if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
     if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
+    
+    if (match.score && match.score.ps && Array.isArray(match.score.ps)) {
+        if (match.score.ps[0] > match.score.ps[1]) return match.team1;
+        if (match.score.ps[1] > match.score.ps[0]) return match.team2;
+    }
     return null;
 }
 
@@ -527,24 +554,36 @@ function toggleBracketColumn(stageKey) {
 }
 
 async function generateStandings() {
+    writeDiag("Network", "Initiating API data stream request...");
     try {
         const response = await fetch(githubSource);
-        if (!response.ok) throw new Error('Network error loading data');
+        writeDiag("Network", `HTTP Status Code received: ${response.status}`);
+        if (!response.ok) throw new Error(`Server returned HTTP condition status: ${response.status}`);
+        
         const data = await response.json();
+        writeDiag("Network", "Successfully validated JSON syntax payload format.");
         window.lastFetchedData = data; 
         renderData(data);
     } catch (error) {
-        document.getElementById('loading').innerText = "❌ Failed to connect to live match servers.";
+        document.getElementById('diagnostic-panel').style.display = 'block';
+        document.getElementById('loading').innerHTML = `❌ <b>Failed to connect to live match servers.</b><br><small style="color:red;">${error.message}</small>`;
+        writeDiag("Network", `CRITICAL: ${error.message}. Look into CORS or absolute URL blocks.`, true);
         console.error(error);
     }
 }
 
 function renderData(data) {
+    writeDiag("Engine", "Parsing raw endpoint schema branches...");
     try {
         let allMatches = extractAllMatches(data);
-        if (allMatches.length === 0) throw new Error('No match data found');
+        writeDiag("Engine", `Extracted matches found count: ${allMatches.length}`);
+        
+        if (allMatches.length === 0) {
+            throw new Error('Data payload structure returned empty array list. Key structure names might have shifted.');
+        }
 
         if (forceTestKO) {
+            writeDiag("Simulation", "Injecting testing knockout models (testko=true)...");
             document.getElementById('test-indicator').innerHTML = `<div class="test-banner">⚠️ BRACKET SIMULATION MODE (testko=true)</div>`;
             const simulatedKO = [];
             const sweepstakeTeams = Object.keys(sweepstakeData).filter((v, i, a) => a.indexOf(v) === i);
@@ -552,16 +591,14 @@ function renderData(data) {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                
-                // Set match index 0 to simulate a penalty shootout scenario (1-1 full time, 5-4 penalties)
-                let scoreObj = (i === 0) ? { ft: [1, 1], et: [1, 1], ps: [5, 4] } : ((i < 14) ? { ft: [2, 1] } : null);
+                let scoreObj = (i < 14) ? { ft: [2, 1] } : null;
                 simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: scoreObj, stageName: "Round of 32" });
             }
             for(let i = 0; i < 8; i++) {
-                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
+                simulatedKO.push({ num: 81 + i, team1: `W65`, team2: `W66`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
             }
             for(let i = 0; i < 4; i++) {
-                simulatedKO.push({ num: 89 + i, team1: `W${81 + (i*2)}`, team2: `W${82 + (i*2)}`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
+                simulatedKO.push({ num: 89 + i, team1: `W81`, team2: `W82`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
             }
             simulatedKO.push({ num: 93, team1: "W89", team2: "W90", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
             simulatedKO.push({ num: 94, team1: "W91", team2: "W92", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
@@ -574,6 +611,7 @@ function renderData(data) {
         document.getElementById('nav-tabs').style.display = 'flex';
 
         // 1. RENDER LIVE FIXTURES
+        writeDiag("Renderer", "Processing Live Fixtures views...");
         const todaysFixtures = allMatches.filter(m => m.date === todayString);
         const yesterdaysResults = allMatches.filter(m => m.date === yesterdayString);
         const fixturesContainer = document.getElementById('fixtures-container');
@@ -585,17 +623,11 @@ function renderData(data) {
             list.forEach(match => {
                 const p1 = sweepstakeData[match.team1] ? `<span class="player-tag">${sweepstakeData[match.team1]}</span>` : '';
                 const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
-                
                 const scoreInfo = parseScores(match);
                 const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
                 const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
-                
-                const penaltyDisplay1 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen1})</span>` : '';
-                const penaltyDisplay2 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen2})</span>` : '';
-                
-                const winner = getMatchWinner(match);
-                const t1Won = winner && winner === match.team1;
-                const t2Won = winner && winner === match.team2;
+                const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2);
+                const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1);
                 
                 html += `
                     <div class="fixture-card">
@@ -605,11 +637,11 @@ function renderData(data) {
                         </div>
                         <div class="fixture-row ${t1Won ? 'winner-highlight' : ''}">
                             <div class="fixture-team" title="${match.team1}">${match.team1} ${p1}</div>
-                            <span class="bracket-match-score">${s1}${penaltyDisplay1}</span>
+                            <span class="bracket-match-score">${s1}</span>
                         </div>
                         <div class="fixture-row ${t2Won ? 'winner-highlight' : ''}">
                             <div class="fixture-team" title="${match.team2}">${match.team2} ${p2}</div>
-                            <span class="bracket-match-score">${s2}${penaltyDisplay2}</span>
+                            <span class="bracket-match-score">${s2}</span>
                         </div>
                     </div>
                 `;
@@ -622,6 +654,7 @@ function renderData(data) {
         fixturesContainer.innerHTML += `<div class="fixtures-section"><div class="fixtures-section-title">⏮️ Yesterday's Results (${formatUKDate(yesterdayString)})</div>${makeFixturesListHTML(yesterdaysResults, "No matches recorded yesterday.")}</div>`;
 
         // 2. RENDER GROUP TABLES
+        writeDiag("Renderer", "Calculating group matrix algorithm data...");
         const standings = {};
         allMatches.forEach(match => {
             const scoreInfo = parseScores(match);
@@ -707,6 +740,7 @@ function renderData(data) {
         });
 
         // 3. SEPARATE AND TRACK KNOCKOUT ROUNDS
+        writeDiag("Renderer", "Mapping knockout rounds separation tree...");
         const knockoutStagesDef = [
             { key: "Round of 32", matches: [] },
             { key: "Round of 16", matches: [] },
@@ -772,7 +806,6 @@ function renderData(data) {
             return { html: 'TBD', isPossibility: false, isReal: false };
         }
 
-        // Sequential resolution loop pipeline pass-through
         knockoutStagesDef.forEach(stage => {
             stage.matches.forEach(match => {
                 const winner = getMatchWinner(match);
@@ -784,6 +817,7 @@ function renderData(data) {
 
         // 5. DETERMINE COLUMN AUTOFOLD AND RENDER GRID
         const totalKnockoutMatchesCount = knockoutStagesDef.reduce((acc, s) => acc + s.matches.length, 0);
+        writeDiag("Renderer", `Discovered tree knockout records: ${totalKnockoutMatchesCount}`);
         
         if (totalKnockoutMatchesCount > 0) {
             const koContainer = document.getElementById('bracket-container');
@@ -863,13 +897,8 @@ function renderData(data) {
                             const s1 = scoreInfo.hasScore ? scoreInfo.score1 : '-';
                             const s2 = scoreInfo.hasScore ? scoreInfo.score2 : '-';
                             
-                            const penaltyDisplay1 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen1})</span>` : '';
-                            const penaltyDisplay2 = scoreInfo.hasPenalties ? ` <span class="penalty-tag">(${scoreInfo.pen2})</span>` : '';
-                            
-                            const winner = getMatchWinner(match);
-                            // Verify matches against the raw template placeholders or the cleanly resolved real team names
-                            const t1Won = winner && (winner === match.team1 || winner === res1.html);
-                            const t2Won = winner && (winner === match.team2 || winner === res2.html);
+                            const t1Won = scoreInfo.hasScore && (scoreInfo.score1 > scoreInfo.score2 || (match.score.ps && match.score.ps[0] > match.score.ps[1]));
+                            const t2Won = scoreInfo.hasScore && (scoreInfo.score2 > scoreInfo.score1 || (match.score.ps && match.score.ps[1] > match.score.ps[0]));
                             
                             let extraLabel = "";
                             if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
@@ -886,14 +915,14 @@ function renderData(data) {
                                             <span class="bracket-team-name">${res1.html}</span>
                                             ${p1}
                                         </div>
-                                        <span class="bracket-match-score">${s1}${penaltyDisplay1}</span>
+                                        <span class="bracket-match-score">${s1}</span>
                                     </div>
                                     <div class="bracket-team-line ${t2Won ? 'winner-highlight' : ''}">
                                         <div class="bracket-team-details">
                                             <span class="bracket-team-name">${res2.html}</span>
                                             ${p2}
                                         </div>
-                                        <span class="bracket-match-score">${s2}${penaltyDisplay2}${extraLabel}</span>
+                                        <span class="bracket-match-score">${s2}${extraLabel}</span>
                                     </div>
                                 </div>
                             `;
@@ -906,9 +935,12 @@ function renderData(data) {
         } else {
             document.getElementById('knockout-tab').innerHTML = `<div class="placeholder-text">Knockout structures will adapt here dynamically as group matches conclude.</div>`;
         }
+        writeDiag("Renderer", "All components rendered cleanly.");
 
     } catch (error) {
-        document.getElementById('loading').innerText = "❌ Error rendering data feed.";
+        document.getElementById('diagnostic-panel').style.display = 'block';
+        document.getElementById('loading').innerHTML = `❌ <b>Error parsing data feed pipeline.</b><br><small style="color:red;">${error.message}</small>`;
+        writeDiag("Renderer", `CRITICAL: ${error.message}`, true);
         console.error(error);
     }
 }
