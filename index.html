@@ -265,13 +265,15 @@
             flex-shrink: 0;
             white-space: nowrap;
         }
-        .penalty-score {
+        .penalty-text {
             color: #e53e3e;
-            font-size: 0.85em;
-            margin-left: 3px;
+            font-weight: normal;
+            font-size: 0.9em;
+            margin-left: 2px;
         }
-        .winner-highlight .penalty-score {
-            color: #fffffff0 !important;
+        .winner-highlight .penalty-text {
+            color: #fff !important;
+            opacity: 0.9;
         }
         
         #loading {
@@ -489,7 +491,6 @@ function extractAllMatches(obj, currentRoundName = '') {
 
 function parseScores(match) {
     if (match.score) {
-        // Fall back to regular full time score if extra time isn't present
         let baseScore = match.score.et || match.score.ft;
         if (baseScore && Array.isArray(baseScore)) {
             return {
@@ -506,17 +507,20 @@ function parseScores(match) {
     return { hasScore: false, score1: null, score2: null, hasPenalties: false, pen1: null, pen2: null, rawSource: null };
 }
 
-function getMatchWinner(match) {
+function getMatchWinner(match, resolve1 = null, resolve2 = null) {
     const scoreInfo = parseScores(match);
     if (!scoreInfo.hasScore) return null;
     
+    const team1Name = (resolve1 && resolve1.isReal) ? resolve1.html : match.team1;
+    const team2Name = (resolve2 && resolve2.isReal) ? resolve2.html : match.team2;
+    
     if (scoreInfo.hasPenalties) {
-        if (scoreInfo.pen1 > scoreInfo.pen2) return match.team1;
-        if (scoreInfo.pen2 > scoreInfo.pen1) return match.team2;
+        if (scoreInfo.pen1 > scoreInfo.pen2) return team1Name;
+        if (scoreInfo.pen2 > scoreInfo.pen1) return team2Name;
     }
     
-    if (scoreInfo.score1 > scoreInfo.score2) return match.team1;
-    if (scoreInfo.score2 > scoreInfo.score1) return match.team2;
+    if (scoreInfo.score1 > scoreInfo.score2) return team1Name;
+    if (scoreInfo.score2 > scoreInfo.score1) return team2Name;
     
     return null;
 }
@@ -552,15 +556,15 @@ function renderData(data) {
             for(let i = 0; i < 16; i++) {
                 let t1 = sweepstakeTeams[i] || `Qualifier ${i*2 + 1}`;
                 let t2 = sweepstakeTeams[i + 16] || `Qualifier ${i*2 + 2}`;
-                // Set match index 0 to simulate a penalty shootout scenario (1-1 full time, 4-3 penalties)
-                let scoreObj = (i === 0) ? { ft: [1, 1], ps: [4, 3] } : ((i < 14) ? { ft: [2, 1] } : null);
+                // Set match index 0 to simulate a penalty shootout scenario (1-1 full time, 5-4 penalties)
+                let scoreObj = (i === 0) ? { ft: [1, 1], ps: [5, 4] } : ((i < 14) ? { ft: [2, 1] } : null);
                 simulatedKO.push({ num: 65 + i, team1: t1, team2: t2, date: todayString, time: "16:00 UTC-4", score: scoreObj, stageName: "Round of 32" });
             }
             for(let i = 0; i < 8; i++) {
-                simulatedKO.push({ num: 81 + i, team1: `W${65 + (i*2)}`, team2: `W${66 + (i*2)}`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
+                simulatedKO.push({ num: 81 + i, team1: `W65`, team2: `W66`, date: yesterdayString, time: "20:00 UTC-4", stageName: "Round of 16" });
             }
             for(let i = 0; i < 4; i++) {
-                simulatedKO.push({ num: 89 + i, team1: `W${81 + (i*2)}`, team2: `W${82 + (i*2)}`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
+                simulatedKO.push({ num: 89 + i, team1: `W81`, team2: `W82`, date: todayString, time: "15:00 UTC-5", stageName: "Quarter-finals" });
             }
             simulatedKO.push({ num: 93, team1: "W89", team2: "W90", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
             simulatedKO.push({ num: 94, team1: "W91", team2: "W92", date: todayString, time: "19:00 UTC-5", stageName: "Semi-finals" });
@@ -586,8 +590,8 @@ function renderData(data) {
                 const p2 = sweepstakeData[match.team2] ? `<span class="player-tag">${sweepstakeData[match.team2]}</span>` : '';
                 const scoreInfo = parseScores(match);
                 
-                const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen1})</span>` : '')) : '-';
-                const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen2})</span>` : '')) : '-';
+                const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen1})</span>` : '')) : '-';
+                const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen2})</span>` : '')) : '-';
                 
                 const winner = getMatchWinner(match);
                 const t1Won = winner && winner === match.team1;
@@ -742,16 +746,6 @@ function renderData(data) {
             });
         });
 
-        // Sequential resolution loop pipeline pass-through
-        knockoutStagesDef.forEach(stage => {
-            stage.matches.forEach(match => {
-                const winner = getMatchWinner(match);
-                if (winner && match.num) {
-                    matchWinnerMap[match.num] = winner;
-                }
-            });
-        });
-
         // Helper function to figure out teams recursively
         function resolveTeamDisplay(teamStr) {
             if (!teamStr) return { html: 'TBD', isPossibility: false, isReal: false };
@@ -778,6 +772,18 @@ function renderData(data) {
             
             return { html: 'TBD', isPossibility: false, isReal: false };
         }
+
+        // Sequential resolution loop pipeline pass-through runs AFTER helper registration loops
+        knockoutStagesDef.forEach(stage => {
+            stage.matches.forEach(match => {
+                const res1 = resolveTeamDisplay(match.team1);
+                const res2 = resolveTeamDisplay(match.team2);
+                const winner = getMatchWinner(match, res1, res2);
+                if (winner && match.num) {
+                    matchWinnerMap[match.num] = winner;
+                }
+            });
+        });
 
         // 5. DETERMINE COLUMN AUTOFOLD AND RENDER GRID
         const totalKnockoutMatchesCount = knockoutStagesDef.reduce((acc, s) => acc + s.matches.length, 0);
@@ -857,12 +863,12 @@ function renderData(data) {
                             const p2 = (res2.isReal && sweepstakeData[res2.html]) ? `<span class="player-tag">${sweepstakeData[res2.html]}</span>` : '';
                             
                             const scoreInfo = parseScores(match);
-                            const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen1})</span>` : '')) : '-';
-                            const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-score">(${scoreInfo.pen2})</span>` : '')) : '-';
+                            const s1 = scoreInfo.hasScore ? (scoreInfo.score1 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen1})</span>` : '')) : '-';
+                            const s2 = scoreInfo.hasScore ? (scoreInfo.score2 + (scoreInfo.hasPenalties ? ` <span class="penalty-text">(${scoreInfo.pen2})</span>` : '')) : '-';
                             
-                            const winner = getMatchWinner(match);
-                            const t1Won = winner && winner === match.team1;
-                            const t2Won = winner && winner === match.team2;
+                            const winner = getMatchWinner(match, res1, res2);
+                            const t1Won = winner && winner === res1.html;
+                            const t2Won = winner && winner === res2.html;
                             
                             let extraLabel = "";
                             if (match.score && match.score.ps) extraLabel = " <small style='color:#e53e3e;font-weight:bold;'>(P)</small>";
